@@ -68,10 +68,14 @@ with tab1:
         with col_m1:
             año_sel = st.selectbox("Seleccionar Año:", [2025, 2026, 2027], index=1)
         with col_m2:
-            mes_sel = st.selectbox("Seleccionar Mes:", list(range(1, 13)), format_func=lambda x: [
-                "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
-                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-            ][x-index_1 if 'index_1' else x-1])
+            mes_sel = st.selectbox(
+    "Seleccionar Mes:", 
+    list(range(1, 13)), 
+    format_func=lambda x: [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ][x - 1]
+)
         
         # Generar los días del mes seleccionado
         primer_dia = datetime(año_sel, mes_sel, 1)
