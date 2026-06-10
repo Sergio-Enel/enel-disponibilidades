@@ -19,18 +19,35 @@ def init_connection():
 supabase = init_connection()
 
 # ==========================================
-# 👨‍💻 BARRA LATERAL (CRÉDITOS Y CONTACTO)
+# 👨‍💻 BARRA LATERAL (CRÉDITOS Y FESTIVOS GLOBALES)
 # ==========================================
 with st.sidebar:
     st.markdown("### ⚡ ENEL Colombia")
     st.markdown("Sistema de Gestión de Disponibilidades y Equidad Operativa.")
+    st.markdown("---")
+    
+    # Lista de festivos proyectada hasta 2030 (Lunes Festivos Colombia)
+    with st.expander("📆 Configuración de Festivos", expanded=False):
+        st.caption("Estos lunes festivos se usarán visualmente y en el motor de jornadas.")
+        str_festivos_default = (
+            "2024-01-01, 2024-01-08, 2024-03-25, 2024-05-13, 2024-06-03, 2024-06-10, 2024-07-01, 2024-08-19, 2024-10-14, 2024-11-04, 2024-11-11, "
+            "2025-01-06, 2025-03-24, 2025-06-02, 2025-06-23, 2025-06-30, 2025-08-18, 2025-10-13, 2025-11-03, 2025-11-17, "
+            "2026-01-12, 2026-03-23, 2026-05-18, 2026-06-08, 2026-06-15, 2026-06-29, 2026-07-20, 2026-08-17, 2026-10-12, 2026-11-02, 2026-11-16, "
+            "2027-01-11, 2027-03-22, 2027-05-10, 2027-05-31, 2027-06-07, 2027-07-05, 2027-08-16, 2027-10-18, 2027-11-01, 2027-11-15, "
+            "2028-01-10, 2028-03-20, 2028-05-29, 2028-06-19, 2028-06-26, 2028-07-03, 2028-08-21, 2028-10-16, 2028-11-06, 2028-11-13, "
+            "2029-01-08, 2029-03-19, 2029-05-14, 2029-06-04, 2029-06-11, 2029-07-02, 2029-08-20, 2029-10-15, 2029-11-05, 2029-11-12, "
+            "2030-01-07, 2030-03-25, 2030-06-03, 2030-06-24, 2030-07-01, 2030-08-19, 2030-10-14, 2030-11-04, 2030-11-11"
+        )
+        str_festivos = st.text_area("Lista de Lunes Festivos (AAAA-MM-DD)", str_festivos_default, height=150)
+        festivos_lunes_lista = [f.strip() for f in str_festivos.split(",") if f.strip()]
+
     st.markdown("---")
     st.markdown("**Desarrollado y mantenido por:**")
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("📧 *sergiocutivam@gmail.com*")
     st.markdown("---")
-    st.caption("Versión 2.0 | Motor Proporcional")
+    st.caption("Versión 2.1 | Motor Proporcional")
 
 # ==========================================
 # 🛠️ FUNCIONES DE BASE DE DATOS
@@ -57,7 +74,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🌴 Ausentismos", 
     "⚙️ Motor Algorítmico",
     "📊 Dashboard",
-    "🔄 Relevos Manuales" # <-- NUEVA PESTAÑA DE REEMPLAZOS
+    "🔄 Relevos Manuales"
 ])
 
 lista_ingenieros = obtener_ingenieros()
@@ -72,7 +89,6 @@ dict_nombres_ing = {ing["id"]: ing["nombre"] for ing in lista_ingenieros}
 with tab1:
     st.header("🗓️ Visualización de Disponibilidad")
     
-    # --- REGLAS DEL ALGORITMO VISIBLES PARA TODOS ---
     with st.expander("📖 **¿Cómo se asignan los turnos? (Reglas de Transparencia)**"):
         st.markdown("""
         El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
@@ -90,7 +106,7 @@ with tab1:
     else:
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            año_sel = st.selectbox("Seleccionar Año:", [2024, 2025, 2026, 2027], index=1)
+            año_sel = st.selectbox("Seleccionar Año:", [2024, 2025, 2026, 2027, 2028, 2029, 2030], index=0)
         with col_m2:
             mes_sel = st.selectbox("Seleccionar Mes:", list(range(1, 13)), format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x - 1])
             
@@ -104,7 +120,17 @@ with tab1:
 
         if "Matriz" in tipo_vista:
             columnas_dias = [d.strftime("%Y-%m-%d") for d in rango_dias]
-            nombres_columnas_bonitas = [d.strftime("%d-%b (%a)") for d in rango_dias]
+            
+            # --- AGREGAR ÍCONO DE FESTIVO EN LOS ENCABEZADOS DE LA MATRIZ ---
+            nombres_columnas_bonitas = []
+            for d in rango_dias:
+                str_fecha = d.strftime("%Y-%m-%d")
+                nombre_base = d.strftime("%d-%b (%a)")
+                if str_fecha in festivos_lunes_lista:
+                    nombres_columnas_bonitas.append(f"🎊 {nombre_base}")
+                else:
+                    nombres_columnas_bonitas.append(nombre_base)
+
             matriz_df = pd.DataFrame(index=[ing["nombre"] for ing in lista_ingenieros], columns=columnas_dias)
             matriz_df = matriz_df.fillna("—")
             
@@ -145,8 +171,14 @@ with tab1:
                 for i, dia in enumerate(semana):
                     with cols_semana[i]:
                         if dia.month == mes_sel:
-                            st.markdown(f"**{dia.day}**")
                             str_dia = dia.strftime("%Y-%m-%d")
+                            
+                            # --- MOSTRAR ÍCONO DE FESTIVO AL LADO DEL NÚMERO ---
+                            if str_dia in festivos_lunes_lista:
+                                st.markdown(f"**{dia.day}** 🎊 *(Festivo)*")
+                            else:
+                                st.markdown(f"**{dia.day}**")
+                                
                             turnos_hoy = [a for a in lista_asignaciones if a["fecha"] == str_dia]
                             vacaciones_hoy = [v for v in lista_vacaciones if datetime.strptime(v["fecha_inicio"], "%Y-%m-%d").date() <= dia <= datetime.strptime(v["fecha_fin"], "%Y-%m-%d").date()]
                             
@@ -170,8 +202,6 @@ with tab2:
     
     with col_form:
         st.subheader("Registrar Profesional")
-        # QUERÍAMOS REACTIVIDAD: Se eliminó el "with st.form" para que el botón "Caso Especial" despliegue la fecha de salida al instante.
-        
         nombre = st.text_input("Nombre Completo:").strip().upper()
         rol = st.selectbox("Rol Fijo:", ["Ingeniero (Líder/Apoyo)", "Supervisor"])
         permite_fds = st.radio("¿Turnos Fin de Semana?", [True, False], format_func=lambda x: "Sí" if x else "No (Restringido)")
@@ -182,15 +212,12 @@ with tab2:
         f_ingreso = st.date_input("Fecha de Ingreso", datetime(2024, 1, 1))
         
         tipo_contrato = st.radio("Tipo de Contrato:", ["Término Indefinido", "Caso Especial (Tiene fecha de salida)"])
-        
-        # MAGIA AQUÍ: Se despliega inmediatamente
         if tipo_contrato == "Caso Especial (Tiene fecha de salida)":
             f_salida = st.date_input("Selecciona la Fecha de Salida programada", datetime.now().date() + timedelta(days=30))
             str_f_salida = str(f_salida)
         else:
             str_f_salida = "2099-12-31"
         
-        # Botón clásico sin ataduras a st.form
         if st.button("💾 Guardar Trabajador", use_container_width=True):
             if nombre:
                 try:
@@ -216,18 +243,38 @@ with tab2:
             df_show.columns = ["ID", "Nombre", "Rol", "¿Nuevo?", "Ingreso", "Salida"]
             st.dataframe(df_show, use_container_width=True, hide_index=True)
             
+            # --- NUEVO: TRANSICIÓN DE NUEVO A ANTIGUO ---
             st.markdown("---")
-            st.subheader("❌ Eliminar Trabajador")
-            ing_a_eliminar = st.selectbox("Selecciona el profesional:", lista_ingenieros, format_func=lambda x: f"{x['id']} - {x['nombre']}")
+            col_b1, col_b2 = st.columns(2)
             
-            if st.button("🗑️ Eliminar permanentemente"):
-                if ing_a_eliminar:
-                    try:
-                        supabase.table("vacaciones").delete().eq("ingeniero_id", ing_a_eliminar["id"]).execute()
-                        supabase.table("asignaciones").delete().eq("ingeniero_id", ing_a_eliminar["id"]).execute()
-                        supabase.table("ingenieros").delete().eq("id", ing_a_eliminar["id"]).execute()
-                        st.rerun()
-                    except Exception as e: st.error(f"Error: {e}")
+            with col_b1:
+                st.subheader("🎓 Quitar estado 'Nuevo'")
+                st.caption("Si un trabajador ya superó su etapa de inducción, retira su etiqueta aquí sin borrar sus datos.")
+                nuevos_lista = [i for i in lista_ingenieros if i.get("es_nuevo", False)]
+                
+                if nuevos_lista:
+                    ing_a_actualizar = st.selectbox("Selecciona al profesional:", nuevos_lista, format_func=lambda x: f"{x['id']} - {x['nombre']}")
+                    if st.button("🔄 Cambiar a Antiguo"):
+                        try:
+                            supabase.table("ingenieros").update({"es_nuevo": False}).eq("id", ing_a_actualizar["id"]).execute()
+                            st.success(f"✅ {ing_a_actualizar['nombre']} ahora es personal antiguo.")
+                            st.rerun()
+                        except Exception as e: st.error(f"Error: {e}")
+                else:
+                    st.info("No hay personal con etiqueta de 'Nuevo'.")
+
+            with col_b2:
+                st.subheader("❌ Eliminar Trabajador")
+                st.caption("Borra definitivamente a una persona de la base de datos (se perderá su historial).")
+                ing_a_eliminar = st.selectbox("Selecciona para eliminar:", lista_ingenieros, format_func=lambda x: f"{x['id']} - {x['nombre']}")
+                if st.button("🗑️ Eliminar permanentemente"):
+                    if ing_a_eliminar:
+                        try:
+                            supabase.table("vacaciones").delete().eq("ingeniero_id", ing_a_eliminar["id"]).execute()
+                            supabase.table("asignaciones").delete().eq("ingeniero_id", ing_a_eliminar["id"]).execute()
+                            supabase.table("ingenieros").delete().eq("id", ing_a_eliminar["id"]).execute()
+                            st.rerun()
+                        except Exception as e: st.error(f"Error: {e}")
 
 # ==========================================
 # 🌴 PESTAÑA 3: AUSENTISMOS Y MOTIVOS
@@ -269,12 +316,7 @@ with tab4:
         f_inicio_calc = col_a1.date_input("Fecha Inicio Semestre", datetime.now().date())
         f_fin_calc = col_a2.date_input("Fecha Fin Semestre", datetime.now().date() + timedelta(days=180))
         
-        st.markdown("**📅 Días Críticos: Lunes Festivos (Colombia)**")
-        st.caption("Añade los lunes festivos. Si el motor detecta que un lunes está en esta lista, lo fusionará con la jornada de FDS y el turno entre semana iniciará el martes.")
-        str_festivos = st.text_area("Listado de Lunes Festivos (Formato YYYY-MM-DD, separados por coma)", 
-                     "2024-01-01, 2024-01-08, 2024-03-25, 2024-05-13, 2024-06-03, 2024-06-10, 2024-07-01, 2024-08-19, 2024-10-14, 2024-11-04, 2024-11-11, 2025-01-06, 2025-03-24, 2025-06-02, 2025-06-23, 2025-06-30, 2025-08-18, 2025-10-13, 2025-11-03, 2025-11-17, 2026-01-12, 2026-03-23, 2026-05-18, 2026-06-08, 2026-06-15, 2026-06-29, 2026-07-20, 2026-08-17, 2026-10-12, 2026-11-02, 2026-11-16")
-        
-        festivos_lunes_lista = [f.strip() for f in str_festivos.split(",") if f.strip()]
+        st.info("ℹ️ El motor está leyendo automáticamente los Lunes Festivos configurados en el panel lateral (Sidebar) para calcular las jornadas.")
 
         if st.button("🚀 Optimizar y Asignar por Jornadas"):
             with st.spinner("Construyendo jornadas y seleccionando personal..."):
@@ -406,7 +448,7 @@ with tab5:
             st.dataframe(resumen_pivot.sort_values(by="TOTAL DÍAS", ascending=False), use_container_width=True)
 
 # ==========================================
-# 🔄 PESTAÑA 6: RELEVOS MANUALES (VOLUNTARIOS/CONTINGENCIA)
+# 🔄 PESTAÑA 6: RELEVOS MANUALES
 # ==========================================
 with tab6:
     st.header("🔄 Relevos y Ajustes Manuales")
@@ -430,7 +472,6 @@ with tab6:
                 for t in turnos_dia:
                     nom = dict_nombres_ing.get(t['ingeniero_id'], 'Ingeniero Eliminado/Desconocido')
                     rol_t = t.get('tipo_dia', 'DISPONIBLE')
-                    # Formato: ID_ASIGNACION - Nombre (Rol)
                     opciones_turno.append(f"{t['id']} - {nom} ({rol_t})")
                 
                 turno_sel = st.selectbox("2. Selecciona quién entrega el turno:", opciones_turno)
@@ -440,7 +481,6 @@ with tab6:
                 
                 if st.button("🔄 Confirmar y Ejecutar Relevo", use_container_width=True):
                     try:
-                        # Actualiza en Supabase el ID del ingeniero para el turno específico
                         supabase.table("asignaciones").update({"ingeniero_id": nuevo_ing["id"]}).eq("id", id_asig_cambiar).execute()
                         st.success(f"✅ ¡Relevo exitoso! {nuevo_ing['nombre']} ha tomado el turno.")
                         st.rerun()
