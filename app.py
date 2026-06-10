@@ -8,7 +8,7 @@ from supabase import create_client, Client
 # ==========================================
 # ⚡ CONFIGURACIÓN DE PÁGINA Y CONEXIÓN
 # ==========================================
-st.set_page_config(page_title="Disponibilidades ENEL", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Disponibilidades ENEL", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 @st.cache_resource
 def init_connection():
@@ -17,6 +17,20 @@ def init_connection():
     return create_client(url, key)
 
 supabase = init_connection()
+
+# ==========================================
+# 👨‍💻 BARRA LATERAL (CRÉDITOS Y CONTACTO)
+# ==========================================
+with st.sidebar:
+    st.markdown("### ⚡ ENEL Colombia")
+    st.markdown("Sistema de Gestión de Disponibilidades y Equidad Operativa.")
+    st.markdown("---")
+    st.markdown("**Desarrollado y mantenido por:**")
+    st.markdown("👨‍💻 **Sergio Cutiva**")
+    st.markdown("📧 *sergio.cutiva@enel.com*")
+    st.markdown("📧 *sergiocutivam@gmail.com*")
+    st.markdown("---")
+    st.caption("Versión 2.0 | Motor Proporcional")
 
 # ==========================================
 # 🛠️ FUNCIONES DE BASE DE DATOS
@@ -33,16 +47,17 @@ def obtener_asignaciones():
 # ==========================================
 # ⚡ INTERFAZ PRINCIPAL
 # ==========================================
-st.title("⚡ Sistema de Asignación de Disponibilidades - ENEL")
+st.title("⚡ Sistema de Asignación de Disponibilidades")
 st.markdown("Matriz de control por jornadas, ausentismos y equidad operativa.")
 st.markdown("---")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📅 Calendario Operativo", 
     "👥 Gestión de Equipo", 
     "🌴 Ausentismos", 
     "⚙️ Motor Algorítmico",
-    "📊 Dashboard de Equidad"
+    "📊 Dashboard",
+    "🔄 Relevos Manuales" # <-- NUEVA PESTAÑA DE REEMPLAZOS
 ])
 
 lista_ingenieros = obtener_ingenieros()
@@ -57,6 +72,19 @@ dict_nombres_ing = {ing["id"]: ing["nombre"] for ing in lista_ingenieros}
 with tab1:
     st.header("🗓️ Visualización de Disponibilidad")
     
+    # --- REGLAS DEL ALGORITMO VISIBLES PARA TODOS ---
+    with st.expander("📖 **¿Cómo se asignan los turnos? (Reglas de Transparencia)**"):
+        st.markdown("""
+        El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
+        * **Jornadas Bloqueadas:** No se asigna por día individual. Se asigna un bloque de *Lunes a Jueves (SEMANA)* o de *Viernes a Domingo (FDS)*. Si el lunes es festivo, la jornada FDS se alarga hasta el Lunes, y la de Semana acorta de Martes a Jueves.
+        * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor).
+        * **Equidad Proporcional:** El sistema busca siempre a la persona que tenga la **menor carga porcentual** (Turnos asignados / Días de contrato vigente). Así, si alguien es nuevo y lleva 1 mes, se le asigna carga equivalente a 1 mes y no se le satura intentando igualar a los antiguos.
+        * **Descanso (Cooldown):** Nadie puede recibir un nuevo turno si no han pasado al menos 2 días desde que terminó su última guardia.
+        * **Excepciones Absolutas:** El motor jamás asigna turnos a personal en sus fechas de vacaciones/incapacidad, ni asigna FDS a roles restringidos.
+        * **Diciembre Crítico:** En fechas duras de Navidad y Año Nuevo, el motor buscará dar prioridad de asignación a quienes tengan la etiqueta de "Personal Nuevo".
+        """)
+    st.markdown("---")
+
     if len(lista_ingenieros) == 0:
         st.info("ℹ️ Comienza registrando al equipo en la pestaña 'Gestión de Equipo'.")
     else:
@@ -97,7 +125,6 @@ with tab1:
                     if "🌴" in matriz_df.at[nom_ing, str_fecha]: 
                         matriz_df.at[nom_ing, str_fecha] = "⚠️ CRÍTICO"
                     else: 
-                        # Extraer el rol dinámico asignado por el motor ej: "SEMANA (Líder)" -> "Líder"
                         tipo = asig.get('tipo_dia', 'DISPONIBLE')
                         rol_mostrar = tipo.split('(')[-1].replace(')', '') if '(' in tipo else tipo
                         matriz_df.at[nom_ing, str_fecha] = f"⚡ {rol_mostrar}"
@@ -143,32 +170,39 @@ with tab2:
     
     with col_form:
         st.subheader("Registrar Profesional")
-        with st.form("form_ingeniero", clear_on_submit=True):
-            nombre = st.text_input("Nombre Completo:").strip().upper()
-            
-            # --- ROLES FIJOS CORREGIDOS ---
-            rol = st.selectbox("Rol Fijo:", ["Ingeniero (Líder/Apoyo)", "Supervisor"])
-            
-            permite_fds = st.radio("¿Turnos Fin de Semana?", [True, False], format_func=lambda x: "Sí" if x else "No (Restringido)")
-            es_nuevo = st.radio("¿Es nuevo? (Prioridad Diciembre)", [False, True], format_func=lambda x: "Sí" if x else "No")
-            
-            st.markdown("---")
-            st.markdown("**Vigencia en el Equipo**")
-            f_ingreso = st.date_input("Fecha de Ingreso", datetime(2024, 1, 1))
-            
-            tipo_contrato = st.radio("Tipo de Contrato:", ["Término Indefinido", "Caso Especial (Tiene fecha de salida)"])
-            str_f_salida = str(st.date_input("Fecha de Salida programada", datetime.now().date() + timedelta(days=30))) if tipo_contrato == "Caso Especial (Tiene fecha de salida)" else "2099-12-31"
-            
-            if st.form_submit_button("💾 Guardar Trabajador"):
-                if nombre:
-                    try:
-                        supabase.table("ingenieros").insert({
-                            "nombre": nombre, "rol": rol, "permite_fin_semana": permite_fds, "es_nuevo": es_nuevo,
-                            "fecha_ingreso": str(f_ingreso), "fecha_salida": str_f_salida
-                        }).execute()
-                        st.success("✅ Guardado correctamente.")
-                        st.rerun()
-                    except Exception as e: st.error(f"Error: {e}")
+        # QUERÍAMOS REACTIVIDAD: Se eliminó el "with st.form" para que el botón "Caso Especial" despliegue la fecha de salida al instante.
+        
+        nombre = st.text_input("Nombre Completo:").strip().upper()
+        rol = st.selectbox("Rol Fijo:", ["Ingeniero (Líder/Apoyo)", "Supervisor"])
+        permite_fds = st.radio("¿Turnos Fin de Semana?", [True, False], format_func=lambda x: "Sí" if x else "No (Restringido)")
+        es_nuevo = st.radio("¿Es nuevo? (Prioridad Diciembre)", [False, True], format_func=lambda x: "Sí" if x else "No")
+        
+        st.markdown("---")
+        st.markdown("**Vigencia en el Equipo**")
+        f_ingreso = st.date_input("Fecha de Ingreso", datetime(2024, 1, 1))
+        
+        tipo_contrato = st.radio("Tipo de Contrato:", ["Término Indefinido", "Caso Especial (Tiene fecha de salida)"])
+        
+        # MAGIA AQUÍ: Se despliega inmediatamente
+        if tipo_contrato == "Caso Especial (Tiene fecha de salida)":
+            f_salida = st.date_input("Selecciona la Fecha de Salida programada", datetime.now().date() + timedelta(days=30))
+            str_f_salida = str(f_salida)
+        else:
+            str_f_salida = "2099-12-31"
+        
+        # Botón clásico sin ataduras a st.form
+        if st.button("💾 Guardar Trabajador", use_container_width=True):
+            if nombre:
+                try:
+                    supabase.table("ingenieros").insert({
+                        "nombre": nombre, "rol": rol, "permite_fin_semana": permite_fds, "es_nuevo": es_nuevo,
+                        "fecha_ingreso": str(f_ingreso), "fecha_salida": str_f_salida
+                    }).execute()
+                    st.success("✅ Guardado correctamente.")
+                    st.rerun()
+                except Exception as e: st.error(f"Error: {e}")
+            else:
+                st.error("⚠️ Por favor ingresa un nombre para el trabajador.")
 
     with col_tabla:
         st.subheader("Personal Activo y Vigencias")
@@ -245,10 +279,8 @@ with tab4:
         if st.button("🚀 Optimizar y Asignar por Jornadas"):
             with st.spinner("Construyendo jornadas y seleccionando personal..."):
                 try:
-                    # Limpiar periodo
                     supabase.table("asignaciones").delete().gte("fecha", str(f_inicio_calc)).lte("fecha", str(f_fin_calc)).execute()
                     
-                    # 1. Agrupar todas las fechas en "Bloques/Jornadas" (Respetando el lunes festivo)
                     lunes_guia = f_inicio_calc - timedelta(days=f_inicio_calc.weekday())
                     bloques = []
                     
@@ -257,18 +289,12 @@ with tab4:
                         lunes_proximo = lunes_guia + timedelta(days=7)
                         es_lunes_prox_festivo = lunes_proximo.strftime("%Y-%m-%d") in festivos_lunes_lista
                         
-                        # --- JORNADA ENTRE SEMANA ---
-                        if es_lunes_actual_festivo:
-                            rango_semana = [lunes_guia + timedelta(days=1), lunes_guia + timedelta(days=2), lunes_guia + timedelta(days=3)] # Mar-Jue
-                        else:
-                            rango_semana = [lunes_guia, lunes_guia + timedelta(days=1), lunes_guia + timedelta(days=2), lunes_guia + timedelta(days=3)] # Lun-Jue
+                        if es_lunes_actual_festivo: rango_semana = [lunes_guia + timedelta(days=1), lunes_guia + timedelta(days=2), lunes_guia + timedelta(days=3)]
+                        else: rango_semana = [lunes_guia, lunes_guia + timedelta(days=1), lunes_guia + timedelta(days=2), lunes_guia + timedelta(days=3)]
                         
-                        # --- JORNADA FIN DE SEMANA ---
-                        rango_fds = [lunes_guia + timedelta(days=4), lunes_guia + timedelta(days=5), lunes_guia + timedelta(days=6)] # Vie-Dom
-                        if es_lunes_prox_festivo:
-                            rango_fds.append(lunes_proximo) # Vie-LunFestivo
+                        rango_fds = [lunes_guia + timedelta(days=4), lunes_guia + timedelta(days=5), lunes_guia + timedelta(days=6)]
+                        if es_lunes_prox_festivo: rango_fds.append(lunes_proximo)
                             
-                        # Guardar bloques si caen en el rango de usuario
                         dias_s = [d for d in rango_semana if f_inicio_calc <= d <= f_fin_calc]
                         if dias_s: bloques.append({'tipo': 'SEMANA', 'fechas': dias_s})
                         
@@ -277,7 +303,6 @@ with tab4:
                             
                         lunes_guia = lunes_proximo
                         
-                    # 2. Control de Ocupación
                     conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros}
                     ultimo_turno = {ing["id"]: f_inicio_calc - timedelta(days=10) for ing in lista_ingenieros}
                     
@@ -289,13 +314,10 @@ with tab4:
                     
                     registros_nuevos = []
                     
-                    # 3. Asignar personal a cada bloque/jornada completa
                     for b in bloques:
                         es_fds = b['tipo'] == 'FDS'
-                        # Es diciembre duro si algún día de la jornada es festivo duro
                         es_critico = any((d.month == 12 and d.day in [24, 25, 31]) or (d.month == 1 and d.day == 1) for d in b['fechas'])
                         
-                        # -- Filtro de Candidatos Elegibles para TODA la jornada --
                         elegibles_ing = []
                         elegibles_sup = []
                         
@@ -303,27 +325,19 @@ with tab4:
                             ingreso = datetime.strptime(ing.get("fecha_ingreso", "2024-01-01")[:10], "%Y-%m-%d").date()
                             salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
                             
-                            # Debe estar activo todo el bloque
                             if not all(ingreso <= d <= salida for d in b['fechas']): continue
-                            # No debe estar en vacaciones en ningún día del bloque
                             if any(any(datetime.strptime(v["fecha_inicio"], "%Y-%m-%d").date() <= d <= datetime.strptime(v["fecha_fin"], "%Y-%m-%d").date() for v in lista_vacaciones if v["ingeniero_id"] == ing["id"]) for d in b['fechas']): continue
-                            # FDS Check
                             if es_fds and not ing.get("permite_fin_semana", True): continue
-                            # Cooldown: Han pasado 2 días desde su última asignación?
                             if (b['fechas'][0] - ultimo_turno[ing["id"]]).days <= 2: continue
                             
                             if "Supervisor" in ing.get("rol", ""): elegibles_sup.append(ing)
                             else: elegibles_ing.append(ing)
                                 
-                        # Función auxiliar para elegir a los mejores N
                         def seleccionar_mejores(pool, cantidad):
-                            if es_critico:
-                                pool.sort(key=lambda x: (not x.get("es_nuevo", False), conteo_turnos[x["id"]] / dias_potenciales[x["id"]]))
-                            else:
-                                pool.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
+                            if es_critico: pool.sort(key=lambda x: (not x.get("es_nuevo", False), conteo_turnos[x["id"]] / dias_potenciales[x["id"]]))
+                            else: pool.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
                             return pool[:cantidad]
 
-                        # REGLA DE ROLES: Semana (1 Lider, 1 Apoyo), FDS (1 Lider, 2 Apoyos, 1 Supervisor)
                         if b['tipo'] == 'SEMANA':
                             elegidos_ing = seleccionar_mejores(elegibles_ing, 2)
                             roles_asignar = ["Líder", "Apoyo"]
@@ -332,18 +346,16 @@ with tab4:
                             roles_asignar = ["Líder", "Apoyo 1", "Apoyo 2"]
                             elegidos_sup = seleccionar_mejores(elegibles_sup, 1)
                             
-                            # Añadir el supervisor a la escritura final
                             for sup in elegidos_sup:
                                 conteo_turnos[sup["id"]] += len(b['fechas'])
                                 ultimo_turno[sup["id"]] = b['fechas'][-1]
                                 for dia in b['fechas']:
                                     registros_nuevos.append({"fecha": str(dia), "ingeniero_id": sup["id"], "tipo_dia": f"FDS (Supervisor)"})
 
-                        # Añadir los ingenieros con su respectivo rol interno
                         for i, ing in enumerate(elegidos_ing):
                             rol_asignado = roles_asignar[i] if i < len(roles_asignar) else "Apoyo"
                             conteo_turnos[ing["id"]] += len(b['fechas'])
-                            ultimo_turno[ing["id"]] = b['fechas'][-1] # Su último turno es el último día de esta jornada
+                            ultimo_turno[ing["id"]] = b['fechas'][-1] 
                             
                             for dia in b['fechas']:
                                 registros_nuevos.append({"fecha": str(dia), "ingeniero_id": ing["id"], "tipo_dia": f"{b['tipo']} ({rol_asignado})"})
@@ -355,8 +367,6 @@ with tab4:
                         st.rerun()
                 except Exception as e:
                     st.error(f"Error procesando el motor: {e}")
-    else:
-        st.warning("No hay equipo registrado.")
 
 # ==========================================
 # 📊 PESTAÑA 5: DASHBOARD DE EQUIDAD
@@ -368,7 +378,6 @@ with tab5:
     else:
         df_asig = pd.DataFrame(lista_asignaciones)
         df_asig['Nombre'] = df_asig['ingeniero_id'].map(dict_nombres_ing)
-        # Limpiar categoría base para las gráficas
         df_asig['Categoria'] = df_asig['tipo_dia'].apply(lambda x: "FDS" if "FDS" in x else "SEMANA")
         
         st.subheader("⚖️ Distribución Total de Turnos por Profesional")
@@ -395,3 +404,48 @@ with tab5:
             if 'FDS' not in resumen_pivot: resumen_pivot['FDS'] = 0
             resumen_pivot['TOTAL DÍAS'] = resumen_pivot['SEMANA'] + resumen_pivot['FDS']
             st.dataframe(resumen_pivot.sort_values(by="TOTAL DÍAS", ascending=False), use_container_width=True)
+
+# ==========================================
+# 🔄 PESTAÑA 6: RELEVOS MANUALES (VOLUNTARIOS/CONTINGENCIA)
+# ==========================================
+with tab6:
+    st.header("🔄 Relevos y Ajustes Manuales")
+    st.markdown("Utiliza esta herramienta cuando un ingeniero requiera ser reemplazado temporalmente (por eventualidad, intercambio voluntario, etc.), sin necesidad de recalcular todo el algoritmo semestral.")
+    
+    if len(lista_asignaciones) == 0:
+        st.info("ℹ️ No hay asignaciones programadas actualmente en la base de datos.")
+    else:
+        col_r1, col_r2 = st.columns([1, 1])
+        
+        with col_r1:
+            fecha_relevo = st.date_input("1. Selecciona la fecha del turno a modificar:")
+            str_fecha_rel = str(fecha_relevo)
+            
+            turnos_dia = [a for a in lista_asignaciones if a["fecha"] == str_fecha_rel]
+            
+            if not turnos_dia:
+                st.warning("⚠️ No hay personal asignado en la fecha seleccionada.")
+            else:
+                opciones_turno = []
+                for t in turnos_dia:
+                    nom = dict_nombres_ing.get(t['ingeniero_id'], 'Ingeniero Eliminado/Desconocido')
+                    rol_t = t.get('tipo_dia', 'DISPONIBLE')
+                    # Formato: ID_ASIGNACION - Nombre (Rol)
+                    opciones_turno.append(f"{t['id']} - {nom} ({rol_t})")
+                
+                turno_sel = st.selectbox("2. Selecciona quién entrega el turno:", opciones_turno)
+                id_asig_cambiar = int(turno_sel.split("-")[0].strip())
+                
+                nuevo_ing = st.selectbox("3. Selecciona quién toma el relevo:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})")
+                
+                if st.button("🔄 Confirmar y Ejecutar Relevo", use_container_width=True):
+                    try:
+                        # Actualiza en Supabase el ID del ingeniero para el turno específico
+                        supabase.table("asignaciones").update({"ingeniero_id": nuevo_ing["id"]}).eq("id", id_asig_cambiar).execute()
+                        st.success(f"✅ ¡Relevo exitoso! {nuevo_ing['nombre']} ha tomado el turno.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Ocurrió un error al intentar hacer el relevo: {e}")
+        
+        with col_r2:
+            st.info("💡 **Nota Operativa:** Este cambio aplica únicamente al día seleccionado. Si la persona que entrega el turno iba a trabajar toda la jornada (ej. Viernes a Domingo), deberás hacer el relevo manualmente para cada uno de esos días en este módulo.")
