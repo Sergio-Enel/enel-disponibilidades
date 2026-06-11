@@ -97,7 +97,7 @@ with tab1:
         * **Equidad Proporcional:** El sistema busca siempre a la persona que tenga la **menor carga porcentual** (Turnos asignados / Días de contrato vigente). Así, si alguien es nuevo y lleva 1 mes, se le asigna carga equivalente a 1 mes y no se le satura intentando igualar a los antiguos.
         * **Descanso (Cooldown):** Nadie puede recibir un nuevo turno si no han pasado al menos 2 días desde que terminó su última guardia.
         * **Excepciones Absolutas:** El motor jamás asigna turnos a personal en sus fechas de vacaciones/incapacidad, ni asigna FDS a roles restringidos.
-        * **Diciembre Crítico:** En fechas duras de Navidad y Año Nuevo, el motor buscará dar prioridad de asignación a quienes tengan la etiqueta de "Personal Nuevo".
+        
         """)
     st.markdown("---")
 
