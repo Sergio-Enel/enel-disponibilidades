@@ -298,7 +298,13 @@ with tab3:
             if len(lista_vacaciones) > 0:
                 df_vac = pd.DataFrame(lista_vacaciones)
                 df_vac['Profesional'] = df_vac['ingeniero_id'].map(dict_nombres_ing)
-                df_show_vac = df_vac[["id", "Profesional", "motivo", "fecha_inicio", "fecha_fin"]].sort_values(by="Fecha Inicio", ascending=False)
+                
+                # --- CORRECCIÓN AQUÍ: Ordenamos usando 'fecha_inicio' (nombre de BD) ---
+                df_show_vac = df_vac[["id", "Profesional", "motivo", "fecha_inicio", "fecha_fin"]].sort_values(by="fecha_inicio", ascending=False)
+                
+                # --- Renombramos las columnas para que se vean bien en la interfaz ---
+                df_show_vac.columns = ["ID", "Profesional", "Motivo", "Fecha Inicio", "Fecha Fin"]
+                
                 st.dataframe(df_show_vac, hide_index=True, use_container_width=True)
                 
                 vac_a_eliminar = st.selectbox("Selecciona ausentismo a cancelar:", lista_vacaciones, format_func=lambda x: f"ID {x['id']} - {dict_nombres_ing.get(x['ingeniero_id'])}")
