@@ -26,7 +26,6 @@ with st.sidebar:
     st.markdown("Sistema de Gestión de Disponibilidades y Equidad Operativa.")
     st.markdown("---")
     
-    # Lista de festivos proyectada hasta 2030 (Lunes Festivos Colombia)
     with st.expander("📆 Configuración de Festivos", expanded=False):
         st.caption("Estos lunes festivos se usarán visualmente y en el motor de jornadas.")
         str_festivos_default = (
@@ -47,7 +46,7 @@ with st.sidebar:
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("📧 *sergiocutivam@gmail.com*")
     st.markdown("---")
-    st.caption("Versión 2.1 | Motor Proporcional")
+    st.caption("Versión 2.2 | Memoria Histórica")
 
 # ==========================================
 # 🛠️ FUNCIONES DE BASE DE DATOS
@@ -74,7 +73,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🌴 Ausentismos", 
     "⚙️ Motor Algorítmico",
     "📊 Dashboard",
-    "🔄 Relevos Manuales"
+    "🔄 Asignaciones Manuales"
 ])
 
 lista_ingenieros = obtener_ingenieros()
@@ -97,7 +96,7 @@ with tab1:
         * **Equidad Proporcional:** El sistema busca siempre a la persona que tenga la **menor carga porcentual** (Turnos asignados / Días de contrato vigente). Así, si alguien es nuevo y lleva 1 mes, se le asigna carga equivalente a 1 mes y no se le satura intentando igualar a los antiguos.
         * **Descanso (Cooldown):** Nadie puede recibir un nuevo turno si no han pasado al menos 2 días desde que terminó su última guardia.
         * **Excepciones Absolutas:** El motor jamás asigna turnos a personal en sus fechas de vacaciones/incapacidad, ni asigna FDS a roles restringidos.
-        
+        * **Asignaciones Manuales:** El algoritmo respeta cualquier turno insertado manualmente y ajusta los cálculos a su alrededor.
         """)
     st.markdown("---")
 
@@ -121,7 +120,6 @@ with tab1:
         if "Matriz" in tipo_vista:
             columnas_dias = [d.strftime("%Y-%m-%d") for d in rango_dias]
             
-            # --- AGREGAR ÍCONO DE FESTIVO EN LOS ENCABEZADOS DE LA MATRIZ ---
             nombres_columnas_bonitas = []
             for d in rango_dias:
                 str_fecha = d.strftime("%Y-%m-%d")
@@ -153,7 +151,9 @@ with tab1:
                     else: 
                         tipo = asig.get('tipo_dia', 'DISPONIBLE')
                         rol_mostrar = tipo.split('(')[-1].replace(')', '') if '(' in tipo else tipo
-                        matriz_df.at[nom_ing, str_fecha] = f"⚡ {rol_mostrar}"
+                        # Indicador visual si es manual
+                        icono = "🛠️" if "MANUAL" in tipo.upper() else "⚡"
+                        matriz_df.at[nom_ing, str_fecha] = f"{icono} {rol_mostrar}"
             
             matriz_df.columns = nombres_columnas_bonitas
             st.dataframe(matriz_df, use_container_width=True)
@@ -173,7 +173,6 @@ with tab1:
                         if dia.month == mes_sel:
                             str_dia = dia.strftime("%Y-%m-%d")
                             
-                            # --- MOSTRAR ÍCONO DE FESTIVO AL LADO DEL NÚMERO ---
                             if str_dia in festivos_lunes_lista:
                                 st.markdown(f"**{dia.day}** 🎊 *(Festivo)*")
                             else:
@@ -187,7 +186,10 @@ with tab1:
                             for a in turnos_hoy:
                                 tipo = a.get('tipo_dia', '')
                                 rol_mostrar = tipo.split('(')[-1].replace(')', '') if '(' in tipo else ''
-                                st.markdown(f"<div style='background-color: #e8f5e9; color: #2e7d32; padding: 4px; border-radius: 4px; font-size: 11px; margin-bottom: 2px; font-weight: bold;'>⚡ {dict_nombres_ing.get(a['ingeniero_id'], '')} ({rol_mostrar})</div>", unsafe_allow_html=True)
+                                color_bg = "#e3f2fd" if "MANUAL" in tipo.upper() else "#e8f5e9"
+                                color_txt = "#1565c0" if "MANUAL" in tipo.upper() else "#2e7d32"
+                                icono = "🛠️" if "MANUAL" in tipo.upper() else "⚡"
+                                st.markdown(f"<div style='background-color: {color_bg}; color: {color_txt}; padding: 4px; border-radius: 4px; font-size: 11px; margin-bottom: 2px; font-weight: bold;'>{icono} {dict_nombres_ing.get(a['ingeniero_id'], '')} ({rol_mostrar})</div>", unsafe_allow_html=True)
                             st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
                         else:
                             st.markdown(f"<span style='color: #ccc;'>{dia.day}</span>", unsafe_allow_html=True)
@@ -243,13 +245,12 @@ with tab2:
             df_show.columns = ["ID", "Nombre", "Rol", "¿Nuevo?", "Ingreso", "Salida"]
             st.dataframe(df_show, use_container_width=True, hide_index=True)
             
-            # --- NUEVO: TRANSICIÓN DE NUEVO A ANTIGUO ---
             st.markdown("---")
             col_b1, col_b2 = st.columns(2)
             
             with col_b1:
                 st.subheader("🎓 Quitar estado 'Nuevo'")
-                st.caption("Si un trabajador ya superó su etapa de inducción, retira su etiqueta aquí sin borrar sus datos.")
+                st.caption("Si un trabajador ya superó su etapa de inducción, retira su etiqueta aquí.")
                 nuevos_lista = [i for i in lista_ingenieros if i.get("es_nuevo", False)]
                 
                 if nuevos_lista:
@@ -265,7 +266,7 @@ with tab2:
 
             with col_b2:
                 st.subheader("❌ Eliminar Trabajador")
-                st.caption("Borra definitivamente a una persona de la base de datos (se perderá su historial).")
+                st.caption("Borra definitivamente a una persona de la base de datos.")
                 ing_a_eliminar = st.selectbox("Selecciona para eliminar:", lista_ingenieros, format_func=lambda x: f"{x['id']} - {x['nombre']}")
                 if st.button("🗑️ Eliminar permanentemente"):
                     if ing_a_eliminar:
@@ -312,17 +313,36 @@ with tab4:
     st.header("⚙️ Motor Algorítmico de Equidad por Jornadas Operativas")
     
     if len(lista_ingenieros) > 0:
+        st.info("💡 **Inteligencia de Datos:** El motor leerá todo el historial en la base de datos para saber cuántos turnos lleva cada persona. Además, si detecta una **asignación manual** dentro del semestre que vas a calcular, saltará ese bloque de días para no sobreescribir tu configuración manual.")
+        
         col_a1, col_a2 = st.columns(2)
         f_inicio_calc = col_a1.date_input("Fecha Inicio Semestre", datetime.now().date())
         f_fin_calc = col_a2.date_input("Fecha Fin Semestre", datetime.now().date() + timedelta(days=180))
-        
-        st.info("ℹ️ El motor está leyendo automáticamente los Lunes Festivos configurados en el panel lateral (Sidebar) para calcular las jornadas.")
 
         if st.button("🚀 Optimizar y Asignar por Jornadas"):
             with st.spinner("Construyendo jornadas y seleccionando personal..."):
                 try:
-                    supabase.table("asignaciones").delete().gte("fecha", str(f_inicio_calc)).lte("fecha", str(f_fin_calc)).execute()
+                    # 1. RECUPERAR TODO EL HISTORIAL PARA RESPETAR MANUALES Y CÁLCULO PREVIO
+                    asigs_historicas = supabase.table("asignaciones").select("*").execute().data
                     
+                    ids_to_delete = []
+                    fechas_manuales_en_rango = set()
+                    
+                    for a in asigs_historicas:
+                        fecha_a = datetime.strptime(a["fecha"], "%Y-%m-%d").date()
+                        if f_inicio_calc <= fecha_a <= f_fin_calc:
+                            if "MANUAL" in a.get("tipo_dia", "").upper():
+                                fechas_manuales_en_rango.add(a["fecha"])
+                            else:
+                                ids_to_delete.append(a["id"])
+
+                    # Borrar solo las generadas por máquina en el rango
+                    for i in range(0, len(ids_to_delete), 100):
+                        supabase.table("asignaciones").delete().in_("id", ids_to_delete[i:i+100]).execute()
+                    
+                    # Conservar en memoria las que sobrevivieron para el conteo de equidad
+                    asigs_restantes = [a for a in asigs_historicas if a["id"] not in ids_to_delete]
+
                     lunes_guia = f_inicio_calc - timedelta(days=f_inicio_calc.weekday())
                     bloques = []
                     
@@ -345,8 +365,25 @@ with tab4:
                             
                         lunes_guia = lunes_proximo
                         
+                    # Filtrar bloques que tengan fechas manuales para respetarlos enteros
+                    bloques_validos = []
+                    for b in bloques:
+                        str_fechas_b = [d.strftime("%Y-%m-%d") for d in b['fechas']]
+                        if any(f in fechas_manuales_en_rango for f in str_fechas_b):
+                            continue # Salta el bloque completo
+                        bloques_validos.append(b)
+
+                    # 2. CALCULAR HISTORIAL REAL (Equidad desde el inicio de los tiempos)
                     conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros}
+                    for a in asigs_restantes:
+                        if a["ingeniero_id"] in conteo_turnos:
+                            conteo_turnos[a["ingeniero_id"]] += 1
+                            
                     ultimo_turno = {ing["id"]: f_inicio_calc - timedelta(days=10) for ing in lista_ingenieros}
+                    for ing in lista_ingenieros:
+                        turnos_ing = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"]]
+                        if turnos_ing:
+                            ultimo_turno[ing["id"]] = max(turnos_ing)
                     
                     dias_potenciales = {}
                     for ing in lista_ingenieros:
@@ -356,7 +393,7 @@ with tab4:
                     
                     registros_nuevos = []
                     
-                    for b in bloques:
+                    for b in bloques_validos:
                         es_fds = b['tipo'] == 'FDS'
                         es_critico = any((d.month == 12 and d.day in [24, 25, 31]) or (d.month == 1 and d.day == 1) for d in b['fechas'])
                         
@@ -404,7 +441,7 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success(f"✅ ¡Se han procesado {len(bloques)} Jornadas Operativas exitosamente!")
+                        st.success(f"✅ ¡Se han procesado {len(bloques_validos)} Jornadas Operativas exitosamente respetando el historial!")
                         st.balloons()
                         st.rerun()
                 except Exception as e:
@@ -416,19 +453,19 @@ with tab4:
 with tab5:
     st.header("📈 Panel de Análisis y Carga Laboral")
     if len(lista_asignaciones) == 0:
-        st.warning("No hay turnos asignados para analizar. Ejecuta el Motor primero.")
+        st.warning("No hay turnos asignados para analizar.")
     else:
         df_asig = pd.DataFrame(lista_asignaciones)
         df_asig['Nombre'] = df_asig['ingeniero_id'].map(dict_nombres_ing)
-        df_asig['Categoria'] = df_asig['tipo_dia'].apply(lambda x: "FDS" if "FDS" in x else "SEMANA")
+        df_asig['Categoria'] = df_asig['tipo_dia'].apply(lambda x: "FDS" if "FDS" in x else ("MANUAL" if "MANUAL" in x else "SEMANA"))
         
         st.subheader("⚖️ Distribución Total de Turnos por Profesional")
         conteo_df = df_asig.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad')
         
         fig_bar = px.bar(
             conteo_df, x='Nombre', y='Cantidad', color='Categoria',
-            title="Días Trabajados Asignados (Semana vs FDS)",
-            color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e"}, text_auto=True
+            title="Días Trabajados Asignados (Semana vs FDS vs Manuales)",
+            color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "MANUAL": "#2ca02c"}, text_auto=True
         )
         st.plotly_chart(fig_bar, use_container_width=True)
         
@@ -444,48 +481,76 @@ with tab5:
             resumen_pivot = conteo_df.pivot(index='Nombre', columns='Categoria', values='Cantidad').fillna(0).astype(int)
             if 'SEMANA' not in resumen_pivot: resumen_pivot['SEMANA'] = 0
             if 'FDS' not in resumen_pivot: resumen_pivot['FDS'] = 0
-            resumen_pivot['TOTAL DÍAS'] = resumen_pivot['SEMANA'] + resumen_pivot['FDS']
+            if 'MANUAL' not in resumen_pivot: resumen_pivot['MANUAL'] = 0
+            resumen_pivot['TOTAL DÍAS'] = resumen_pivot['SEMANA'] + resumen_pivot['FDS'] + resumen_pivot['MANUAL']
             st.dataframe(resumen_pivot.sort_values(by="TOTAL DÍAS", ascending=False), use_container_width=True)
 
 # ==========================================
-# 🔄 PESTAÑA 6: RELEVOS MANUALES
+# 🔄 PESTAÑA 6: RELEVOS Y ASIGNACIÓN MANUAL
 # ==========================================
 with tab6:
-    st.header("🔄 Relevos y Ajustes Manuales")
-    st.markdown("Utiliza esta herramienta cuando un ingeniero requiera ser reemplazado temporalmente (por eventualidad, intercambio voluntario, etc.), sin necesidad de recalcular todo el algoritmo semestral.")
+    st.header("🔄 Asignaciones y Relevos Manuales")
     
-    if len(lista_asignaciones) == 0:
-        st.info("ℹ️ No hay asignaciones programadas actualmente en la base de datos.")
-    else:
-        col_r1, col_r2 = st.columns([1, 1])
+    col_r1, col_r2 = st.columns(2)
+    
+    with col_r1:
+        st.subheader("➕ Agregar Turno Manual")
+        st.markdown("Usa esta opción si el mes ya está corriendo o si quieres fijar fechas **antes** de correr el motor automático.")
+        rango_manual = st.date_input("Rango de fechas a asignar (o un solo día):", [])
+        ing_manual = st.selectbox("Profesional:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})", key="ing_man")
+        rol_manual = st.selectbox("Rol en el turno:", ["Líder", "Apoyo", "Apoyo 1", "Apoyo 2", "Supervisor"])
         
-        with col_r1:
-            fecha_relevo = st.date_input("1. Selecciona la fecha del turno a modificar:")
+        if st.button("💾 Guardar Asignación Manual", use_container_width=True):
+            if len(rango_manual) > 0:
+                start_d = rango_manual[0]
+                end_d = rango_manual[-1] if len(rango_manual) > 1 else rango_manual[0]
+                
+                dia_aux = start_d
+                nuevos_registros = []
+                while dia_aux <= end_d:
+                    nuevos_registros.append({
+                        "fecha": str(dia_aux),
+                        "ingeniero_id": ing_manual["id"],
+                        "tipo_dia": f"MANUAL ({rol_manual})"
+                    })
+                    dia_aux += timedelta(days=1)
+                
+                try:
+                    supabase.table("asignaciones").insert(nuevos_registros).execute()
+                    st.success("✅ Turnos manuales agregados correctamente.")
+                    st.rerun()
+                except Exception as e: st.error(f"Error: {e}")
+            else:
+                st.error("⚠️ Selecciona al menos una fecha.")
+    
+    with col_r2:
+        st.subheader("🔄 Modificar / Relevo de Turno")
+        st.markdown("Modifica quién asiste a un turno que **ya existe** en el calendario.")
+        if len(lista_asignaciones) == 0:
+            st.info("ℹ️ No hay turnos asignados aún.")
+        else:
+            fecha_relevo = st.date_input("1. Selecciona la fecha a modificar:")
             str_fecha_rel = str(fecha_relevo)
             
             turnos_dia = [a for a in lista_asignaciones if a["fecha"] == str_fecha_rel]
             
             if not turnos_dia:
-                st.warning("⚠️ No hay personal asignado en la fecha seleccionada.")
+                st.warning("⚠️ No hay personal programado en esa fecha.")
             else:
                 opciones_turno = []
                 for t in turnos_dia:
-                    nom = dict_nombres_ing.get(t['ingeniero_id'], 'Ingeniero Eliminado/Desconocido')
+                    nom = dict_nombres_ing.get(t['ingeniero_id'], 'Desconocido')
                     rol_t = t.get('tipo_dia', 'DISPONIBLE')
                     opciones_turno.append(f"{t['id']} - {nom} ({rol_t})")
                 
-                turno_sel = st.selectbox("2. Selecciona quién entrega el turno:", opciones_turno)
+                turno_sel = st.selectbox("2. Quién entrega el turno:", opciones_turno)
                 id_asig_cambiar = int(turno_sel.split("-")[0].strip())
+                nuevo_ing = st.selectbox("3. Quién toma el relevo:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})")
                 
-                nuevo_ing = st.selectbox("3. Selecciona quién toma el relevo:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})")
-                
-                if st.button("🔄 Confirmar y Ejecutar Relevo", use_container_width=True):
+                if st.button("🔄 Ejecutar Relevo", use_container_width=True):
                     try:
                         supabase.table("asignaciones").update({"ingeniero_id": nuevo_ing["id"]}).eq("id", id_asig_cambiar).execute()
                         st.success(f"✅ ¡Relevo exitoso! {nuevo_ing['nombre']} ha tomado el turno.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Ocurrió un error al intentar hacer el relevo: {e}")
-        
-        with col_r2:
-            st.info("💡 **Nota Operativa:** Este cambio aplica únicamente al día seleccionado. Si la persona que entrega el turno iba a trabajar toda la jornada (ej. Viernes a Domingo), deberás hacer el relevo manualmente para cada uno de esos días en este módulo.")
+                        st.error(f"Error: {e}")
