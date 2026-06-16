@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import calendar
 import plotly.express as px
 from supabase import create_client, Client
@@ -29,8 +29,6 @@ with st.sidebar:
     with st.expander("📆 Configuración de Festivos", expanded=False):
         st.caption("Estos lunes festivos se usarán visualmente y en el motor de jornadas.")
         str_festivos_default = (
-            "2024-01-01, 2024-01-08, 2024-03-25, 2024-05-13, 2024-06-03, 2024-06-10, 2024-07-01, 2024-08-19, 2024-10-14, 2024-11-04, 2024-11-11, "
-            "2025-01-06, 2025-03-24, 2025-06-02, 2025-06-23, 2025-06-30, 2025-08-18, 2025-10-13, 2025-11-03, 2025-11-17, "
             "2026-01-12, 2026-03-23, 2026-05-18, 2026-06-08, 2026-06-15, 2026-06-29, 2026-07-20, 2026-08-17, 2026-10-12, 2026-11-02, 2026-11-16, "
             "2027-01-11, 2027-03-22, 2027-05-10, 2027-05-31, 2027-06-07, 2027-07-05, 2027-08-16, 2027-10-18, 2027-11-01, 2027-11-15, "
             "2028-01-10, 2028-03-20, 2028-05-29, 2028-06-19, 2028-06-26, 2028-07-03, 2028-08-21, 2028-10-16, 2028-11-06, 2028-11-13, "
@@ -67,7 +65,7 @@ def obtener_estilo_motivo(motivo):
 
 def obtener_estilo_rol(tipo_dia, rol_mostrar):
     # Devuelve: (Emoji, Color_Fondo, Color_Texto)
-    if "MANUAL" in tipo_dia.upper(): return ("🛠️", "#f5f5f5", "#424242")
+    if "MANUAL" in tipo_dia.upper(): return ("📌", "#ffe0b2", "#e65100")
     if "Líder" in rol_mostrar: return ("👑", "#e3f2fd", "#1565c0")
     if "Apoyo" in rol_mostrar: return ("🤝", "#e8f5e9", "#2e7d32")
     if "Supervisor" in rol_mostrar: return ("🛡️", "#fff3e0", "#e65100")
@@ -76,6 +74,8 @@ def obtener_estilo_rol(tipo_dia, rol_mostrar):
 # ==========================================
 # ⚡ INTERFAZ PRINCIPAL
 # ==========================================
+FECHA_MIN = date(2026, 1, 1)
+
 st.title("⚡ Sistema de Asignación de Disponibilidades")
 st.markdown("Matriz de control por jornadas, ausentismos y equidad operativa.")
 st.markdown("---")
@@ -118,7 +118,7 @@ with tab1:
     else:
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            año_sel = st.selectbox("Seleccionar Año:", [2024, 2025, 2026, 2027, 2028, 2029, 2030], index=0)
+            año_sel = st.selectbox("Seleccionar Año:", [2026, 2027, 2028, 2029, 2030], index=0)
         with col_m2:
             mes_sel = st.selectbox("Seleccionar Mes:", list(range(1, 13)), format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x - 1])
             
@@ -226,11 +226,11 @@ with tab2:
         
         st.markdown("---")
         st.markdown("**Vigencia en el Equipo**")
-        f_ingreso = st.date_input("Fecha de Ingreso", datetime(2024, 1, 1))
+        f_ingreso = st.date_input("Fecha de Ingreso", FECHA_MIN, min_value=FECHA_MIN)
         
         tipo_contrato = st.radio("Tipo de Contrato:", ["Término Indefinido", "Caso Especial (Tiene fecha de salida)"])
         if tipo_contrato == "Caso Especial (Tiene fecha de salida)":
-            f_salida = st.date_input("Selecciona la Fecha de Salida programada", datetime.now().date() + timedelta(days=30))
+            f_salida = st.date_input("Selecciona la Fecha de Salida programada", max(datetime.now().date() + timedelta(days=30), FECHA_MIN), min_value=FECHA_MIN)
             str_f_salida = str(f_salida)
         else:
             str_f_salida = "2099-12-31"
@@ -252,7 +252,7 @@ with tab2:
         st.subheader("Personal Activo y Vigencias")
         if len(lista_ingenieros) > 0:
             df_ing = pd.DataFrame(lista_ingenieros)
-            if 'fecha_ingreso' not in df_ing.columns: df_ing['fecha_ingreso'] = "2024-01-01"
+            if 'fecha_ingreso' not in df_ing.columns: df_ing['fecha_ingreso'] = "2026-01-01"
             if 'fecha_salida' not in df_ing.columns: df_ing['fecha_salida'] = "2099-12-31"
             
             df_ing['Vigencia Hasta'] = df_ing['fecha_salida'].apply(lambda x: "Indefinido" if "2099" in str(x) else x)
@@ -303,7 +303,7 @@ with tab3:
             with st.form("form_vac"):
                 ing_ausente = st.selectbox("Profesional:", lista_ingenieros, format_func=lambda x: x["nombre"])
                 motivo_ausentismo = st.selectbox("Tipo de Ausentismo:", ["Vacaciones", "Incapacidad Médica", "Permiso Empresa", "Licencia", "Otro"])
-                fechas = st.date_input("Rango de Fechas:", [])
+                fechas = st.date_input("Rango de Fechas:", [], min_value=FECHA_MIN)
                 
                 if st.form_submit_button("📅 Bloquear Fechas") and len(fechas) == 2:
                     supabase.table("vacaciones").insert({"ingeniero_id": ing_ausente["id"], "fecha_inicio": str(fechas[0]), "fecha_fin": str(fechas[1]), "motivo": motivo_ausentismo}).execute()
@@ -334,8 +334,8 @@ with tab4:
         st.info("💡 **Inteligencia de Datos:** El motor respetará el Cooldown estricto de 3 semanas (20 días de gap) y las asignaciones manuales previas.")
         
         col_a1, col_a2 = st.columns(2)
-        f_inicio_calc = col_a1.date_input("Fecha Inicio Semestre", datetime.now().date())
-        f_fin_calc = col_a2.date_input("Fecha Fin Semestre", datetime.now().date() + timedelta(days=180))
+        f_inicio_calc = col_a1.date_input("Fecha Inicio Semestre", max(datetime.now().date(), FECHA_MIN), min_value=FECHA_MIN)
+        f_fin_calc = col_a2.date_input("Fecha Fin Semestre", max(datetime.now().date() + timedelta(days=180), FECHA_MIN), min_value=FECHA_MIN)
 
         if st.button("🚀 Optimizar y Asignar por Jornadas"):
             with st.spinner("Construyendo jornadas y seleccionando personal..."):
@@ -402,7 +402,7 @@ with tab4:
                     
                     dias_potenciales = {}
                     for ing in lista_ingenieros:
-                        ingreso = datetime.strptime(ing.get("fecha_ingreso", "2024-01-01")[:10], "%Y-%m-%d").date()
+                        ingreso = datetime.strptime(ing.get("fecha_ingreso", "2026-01-01")[:10], "%Y-%m-%d").date()
                         salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
                         dias_potenciales[ing["id"]] = max(1, sum(1 for d in [f_inicio_calc + timedelta(days=x) for x in range((f_fin_calc - f_inicio_calc).days + 1)] if ingreso <= d <= salida))
                     
@@ -416,7 +416,7 @@ with tab4:
                         elegibles_sup = []
                         
                         for ing in lista_ingenieros:
-                            ingreso = datetime.strptime(ing.get("fecha_ingreso", "2024-01-01")[:10], "%Y-%m-%d").date()
+                            ingreso = datetime.strptime(ing.get("fecha_ingreso", "2026-01-01")[:10], "%Y-%m-%d").date()
                             salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
                             
                             if not all(ingreso <= d <= salida for d in b['fechas']): continue
@@ -528,7 +528,7 @@ with tab6:
     with col_r1:
         st.subheader("➕ Agregar Turno Manual")
         st.markdown("Usa esta opción si quieres fijar fechas **antes** de correr el motor automático.")
-        rango_manual = st.date_input("Rango de fechas a asignar (o un solo día):", [])
+        rango_manual = st.date_input("Rango de fechas a asignar (o un solo día):", [], min_value=FECHA_MIN)
         ing_manual = st.selectbox("Profesional:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})", key="ing_man")
         rol_manual = st.selectbox("Rol en el turno:", ["Líder", "Apoyo", "Apoyo 1", "Apoyo 2", "Supervisor"])
         
@@ -561,7 +561,7 @@ with tab6:
         if len(lista_asignaciones) == 0:
             st.info("ℹ️ No hay turnos asignados aún.")
         else:
-            fecha_relevo = st.date_input("1. Selecciona la fecha a modificar:")
+            fecha_relevo = st.date_input("1. Selecciona la fecha a modificar:", min_value=FECHA_MIN)
             str_fecha_rel = str(fecha_relevo)
             
             turnos_dia = [a for a in lista_asignaciones if a["fecha"] == str_fecha_rel]
