@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 3.0 | Estética y Lógica Avanzada")
+    st.caption("Versión 4.0 | Dashboard Gerencial Integrado")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -53,7 +53,6 @@ def obtener_vacaciones(): return supabase.table("vacaciones").select("*").execut
 def obtener_asignaciones(): return supabase.table("asignaciones").select("*").execute().data
 
 def obtener_estilo_motivo(motivo):
-    # Devuelve: (Emoji, Color_Fondo, Color_Texto)
     estilos = {
         "Vacaciones": ("🌴", "#e0f7fa", "#006064"),
         "Incapacidad Médica": ("🤒", "#ffebee", "#c62828"),
@@ -64,7 +63,6 @@ def obtener_estilo_motivo(motivo):
     return estilos.get(motivo, ("⚠️", "#fff8e1", "#ff8f00"))
 
 def obtener_estilo_rol(tipo_dia, rol_mostrar):
-    # Devuelve: (Emoji, Color_Fondo, Color_Texto)
     if "MANUAL" in tipo_dia.upper(): return ("📌", "#ffe0b2", "#e65100")
     if "Líder" in rol_mostrar: return ("👑", "#e3f2fd", "#1565c0")
     if "Apoyo" in rol_mostrar: return ("🤝", "#e8f5e9", "#2e7d32")
@@ -85,7 +83,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "👥 Gestión de Equipo", 
     "🌴 Ausentismos", 
     "⚙️ Motor Algorítmico",
-    "📊 Dashboard",
+    "📊 Dashboard Ejecutivo",
     "🔄 Asignaciones Manuales"
 ])
 
@@ -440,15 +438,12 @@ with tab4:
                             elegidos_sup = []
                         else:
                             # 🌟 LOGICA FDS CON SUPERVISORES COMO APOYO
-                            # 1. Asignar el Supervisor Principal Oficial
                             elegidos_sup = seleccionar_mejores(elegibles_sup, 1)
                             sup_id = elegidos_sup[0]["id"] if elegidos_sup else None
                             
-                            # 2. Asignar el Líder (del pool normal de ingenieros)
                             elegidos_lider = seleccionar_mejores(elegibles_ing, 1)
                             lider_id = elegidos_lider[0]["id"] if elegidos_lider else None
                             
-                            # 3. Unir Ingenieros Sobrantes y Supervisores Sobrantes para ser "Apoyos"
                             pool_apoyos = [x for x in elegibles_ing if x["id"] != lider_id] + \
                                           [x for x in elegibles_sup if x["id"] != sup_id]
                             
@@ -457,7 +452,6 @@ with tab4:
                             elegidos_ing = elegidos_lider + elegidos_apoyos
                             roles_asignar = ["Líder", "Apoyo 1", "Apoyo 2"]
                             
-                        # Guardar en registros y actualizar memorias de tiempo (para cooldown)
                         for sup in elegidos_sup:
                             conteo_turnos[sup["id"]] += len(b['fechas'])
                             ultimo_turno[sup["id"]] = b['fechas'][-1]
@@ -480,40 +474,99 @@ with tab4:
                     st.error(f"Error procesando el motor: {e}")
 
 # ==========================================
-# 📊 PESTAÑA 5: DASHBOARD DE EQUIDAD
+# 📊 PESTAÑA 5: DASHBOARD DE EQUIDAD (ACTUALIZADO)
 # ==========================================
 with tab5:
-    st.header("📈 Panel de Análisis y Carga Laboral")
+    st.header("📈 Panel Ejecutivo de Análisis y Equidad Operativa")
+    
     if len(lista_asignaciones) == 0:
         st.warning("No hay turnos asignados para analizar.")
     else:
+        # Preparamos los datos base
         df_asig = pd.DataFrame(lista_asignaciones)
         df_asig['Nombre'] = df_asig['ingeniero_id'].map(dict_nombres_ing)
         df_asig['Categoria'] = df_asig['tipo_dia'].apply(lambda x: "FDS" if "FDS" in x else ("MANUAL" if "MANUAL" in x else "SEMANA"))
+        df_asig['Fecha_dt'] = pd.to_datetime(df_asig['fecha'])
+        df_asig = df_asig.sort_values(['Nombre', 'Categoria', 'Fecha_dt'])
         
-        st.subheader("⚖️ Distribución Total de Turnos por Profesional")
-        conteo_df = df_asig.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad')
+        # -------------------------------------------------------------
+        # 🎯 LÓGICA AVANZADA: CÁLCULO DE "TURNOS" (BLOQUES CONTINUOS)
+        # -------------------------------------------------------------
+        # Si la diferencia entre fechas de un mismo tipo es mayor a 1 día, es un nuevo turno/bloque.
+        df_asig['Dias_Dif'] = df_asig.groupby(['Nombre', 'Categoria'])['Fecha_dt'].diff().dt.days
+        df_asig['Nuevo_Turno'] = (df_asig['Dias_Dif'] > 1).astype(int)
+        df_asig['Nuevo_Turno'] = df_asig['Nuevo_Turno'].fillna(1) # El primer registro siempre es un nuevo turno
+        df_asig['ID_Bloque'] = df_asig.groupby(['Nombre', 'Categoria'])['Nuevo_Turno'].cumsum()
         
-        fig_bar = px.bar(
-            conteo_df, x='Nombre', y='Cantidad', color='Categoria',
-            title="Días Trabajados Asignados (Semana vs FDS vs Manuales)",
-            color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "MANUAL": "#2ca02c"}, text_auto=True
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
-        
+        # Agrupamos por los bloques creados para contar cuántos turnos reales hizo cada persona
+        df_turnos_agrupados = df_asig.groupby(['Nombre', 'Categoria', 'ID_Bloque']).size().reset_index(name='Dias_en_Turno')
+        conteo_turnos_reales = df_turnos_agrupados.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
+
+        st.markdown("### ⚖️ 1. Distribución de Carga Operativa")
         col_g1, col_g2 = st.columns(2)
+        
         with col_g1:
-            st.subheader("🔥 Carga de Fines de Semana")
-            df_fds = df_asig[df_asig['Categoria'] == 'FDS']
-            fig_pie = px.pie(df_fds, names='Nombre', title="¿Quién hace más Fines de Semana?", hole=0.4)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            fig_turnos = px.bar(
+                conteo_turnos_reales, x='Nombre', y='Cantidad_Turnos', color='Categoria',
+                title="Conteo por TURNOS (Bloques Completos)",
+                color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "MANUAL": "#2ca02c"}, text_auto=True,
+                labels={'Cantidad_Turnos': 'Cant. de Turnos (Bloques)'}
+            )
+            st.plotly_chart(fig_turnos, use_container_width=True)
             
         with col_g2:
-            st.subheader("📊 Resumen Tabular de Días")
-            resumen_pivot = conteo_df.pivot(index='Nombre', columns='Categoria', values='Cantidad').fillna(0).astype(int)
-            if 'SEMANA' not in resumen_pivot: resumen_pivot['SEMANA'] = 0
-            if 'FDS' not in resumen_pivot: resumen_pivot['FDS'] = 0
-            if 'MANUAL' not in resumen_pivot: resumen_pivot['MANUAL'] = 0
+            conteo_dias = df_asig.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Dias')
+            fig_dias = px.bar(
+                conteo_dias, x='Nombre', y='Cantidad_Dias', color='Categoria',
+                title="Conteo por DÍAS INDIVIDUALES",
+                color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "MANUAL": "#2ca02c"}, text_auto=True,
+                labels={'Cantidad_Dias': 'Días Trabajados'}
+            )
+            st.plotly_chart(fig_dias, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("### 🌴 2. Impacto de Ausentismos")
+        if len(lista_vacaciones) > 0:
+            vac_records = []
+            for v in lista_vacaciones:
+                nom = dict_nombres_ing.get(v['ingeniero_id'], 'Desconocido')
+                start = datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")
+                end = datetime.strptime(v['fecha_fin'], "%Y-%m-%d")
+                motivo = v.get('motivo', 'Otro')
+                dias_fuera = (end - start).days + 1
+                vac_records.append({'Nombre': nom, 'Motivo': motivo, 'Dias_Ausente': dias_fuera})
+                
+            df_vac_stats = pd.DataFrame(vac_records).groupby(['Nombre', 'Motivo'])['Dias_Ausente'].sum().reset_index()
+            
+            col_v1, col_v2 = st.columns([2, 1])
+            with col_v1:
+                fig_vac_bar = px.bar(
+                    df_vac_stats, x='Nombre', y='Dias_Ausente', color='Motivo',
+                    title="Días Totales de Ausencia por Profesional", text_auto=True,
+                    color_discrete_map={"Vacaciones": "#00bcd4", "Incapacidad Médica": "#f44336", "Permiso Empresa": "#9c27b0", "Licencia": "#4caf50", "Otro": "#ff9800"},
+                    labels={'Dias_Ausente': 'Días Fuera'}
+                )
+                st.plotly_chart(fig_vac_bar, use_container_width=True)
+            with col_v2:
+                fig_vac_pie = px.pie(df_vac_stats, names='Motivo', values='Dias_Ausente', title="Motivos Generales", hole=0.4)
+                st.plotly_chart(fig_vac_pie, use_container_width=True)
+        else:
+            st.info("No hay registros de ausentismos para analizar en este momento.")
+
+        st.markdown("---")
+        st.markdown("### 📊 3. Resumen Tabular Comparativo")
+        col_t1, col_t2 = st.columns([1, 2])
+
+        with col_t1:
+            df_fds = df_asig[df_asig['Categoria'] == 'FDS']
+            fig_pie_fds = px.pie(df_fds, names='Nombre', title="¿Quién hace más Fines de Semana?", hole=0.4)
+            st.plotly_chart(fig_pie_fds, use_container_width=True)
+
+        with col_t2:
+            st.caption("Matriz Exacta de Días Asignados")
+            resumen_pivot = conteo_dias.pivot(index='Nombre', columns='Categoria', values='Cantidad_Dias').fillna(0).astype(int)
+            for col in ['SEMANA', 'FDS', 'MANUAL']:
+                if col not in resumen_pivot.columns: resumen_pivot[col] = 0
             resumen_pivot['TOTAL DÍAS'] = resumen_pivot['SEMANA'] + resumen_pivot['FDS'] + resumen_pivot['MANUAL']
             st.dataframe(resumen_pivot.sort_values(by="TOTAL DÍAS", ascending=False), use_container_width=True)
 
