@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 4.0 | Dashboard Gerencial Integrado")
+    st.caption("Versión 4.1 | Autocompletado de Turnos Manuales")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -108,6 +108,7 @@ with tab1:
         * **Equidad Proporcional:** El sistema busca siempre a la persona que tenga la **menor carga porcentual** (Turnos / Días de contrato).
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia (garantizando un descanso de mínimo 3 semanas completas).
         * **Excepciones Absolutas:** El motor jamás asigna turnos a personal en sus fechas de ausentismo.
+        * **Autocompletado:** El sistema respeta asignaciones manuales, y si un bloque está incompleto, auto-rellena los puestos faltantes.
         """)
     st.markdown("---")
 
@@ -329,7 +330,7 @@ with tab4:
     st.header("⚙️ Motor Algorítmico de Equidad por Jornadas Operativas")
     
     if len(lista_ingenieros) > 0:
-        st.info("💡 **Inteligencia de Datos:** El motor respetará el Cooldown estricto de 3 semanas (20 días de gap) y las asignaciones manuales previas.")
+        st.info("💡 **Inteligencia de Datos:** El motor respetará el Cooldown estricto de 3 semanas (20 días de gap) y **completará** las asignaciones manuales previas.")
         
         col_a1, col_a2 = st.columns(2)
         f_inicio_calc = col_a1.date_input("Fecha Inicio Semestre", max(datetime.now().date(), FECHA_MIN), min_value=FECHA_MIN)
@@ -338,28 +339,26 @@ with tab4:
         if st.button("🚀 Optimizar y Asignar por Jornadas"):
             with st.spinner("Construyendo jornadas y seleccionando personal..."):
                 try:
-                    # 1. RECUPERAR TODO EL HISTORIAL PARA RESPETAR MANUALES
+                    # 1. RECUPERAR TODO EL HISTORIAL Y BORRAR SÓLO LAS AUTOMÁTICAS
                     asigs_historicas = supabase.table("asignaciones").select("*").execute().data
-                    
                     ids_to_delete = []
-                    fechas_manuales_en_rango = set()
                     
                     for a in asigs_historicas:
                         fecha_a = datetime.strptime(a["fecha"], "%Y-%m-%d").date()
                         if f_inicio_calc <= fecha_a <= f_fin_calc:
-                            if "MANUAL" in a.get("tipo_dia", "").upper():
-                                fechas_manuales_en_rango.add(a["fecha"])
-                            else:
+                            # Si no es manual, se borra para re-calcular
+                            if "MANUAL" not in a.get("tipo_dia", "").upper():
                                 ids_to_delete.append(a["id"])
 
-                    # Borrar solo las automáticas previas en el rango
                     for i in range(0, len(ids_to_delete), 100):
                         supabase.table("asignaciones").delete().in_("id", ids_to_delete[i:i+100]).execute()
                     
+                    # Lo que queda en la base de datos son las asignaciones manuales o fuera de rango
                     asigs_restantes = [a for a in asigs_historicas if a["id"] not in ids_to_delete]
 
+                    # 2. CALCULAR BLOQUES DEL SEMESTRE
                     lunes_guia = f_inicio_calc - timedelta(days=f_inicio_calc.weekday())
-                    bloques = []
+                    bloques_validos = []
                     
                     while lunes_guia <= f_fin_calc:
                         es_lunes_actual_festivo = lunes_guia.strftime("%Y-%m-%d") in festivos_lunes_lista
@@ -373,26 +372,19 @@ with tab4:
                         if es_lunes_prox_festivo: rango_fds.append(lunes_proximo)
                             
                         dias_s = [d for d in rango_semana if f_inicio_calc <= d <= f_fin_calc]
-                        if dias_s: bloques.append({'tipo': 'SEMANA', 'fechas': dias_s})
+                        if dias_s: bloques_validos.append({'tipo': 'SEMANA', 'fechas': dias_s})
                         
                         dias_f = [d for d in rango_fds if f_inicio_calc <= d <= f_fin_calc]
-                        if dias_f: bloques.append({'tipo': 'FDS', 'fechas': dias_f})
+                        if dias_f: bloques_validos.append({'tipo': 'FDS', 'fechas': dias_f})
                             
                         lunes_guia = lunes_proximo
-                        
-                    bloques_validos = []
-                    for b in bloques:
-                        str_fechas_b = [d.strftime("%Y-%m-%d") for d in b['fechas']]
-                        if any(f in fechas_manuales_en_rango for f in str_fechas_b): continue
-                        bloques_validos.append(b)
 
-                    # 2. CALCULAR HISTORIAL REAL
+                    # 3. CALCULAR HISTORIAL REAL PARA EQUIDAD (Incluye manuales previas)
                     conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros}
                     for a in asigs_restantes:
                         if a["ingeniero_id"] in conteo_turnos:
                             conteo_turnos[a["ingeniero_id"]] += 1
                             
-                    # Fecha ficticia para que todos puedan trabajar la primera vez
                     ultimo_turno = {ing["id"]: f_inicio_calc - timedelta(days=50) for ing in lista_ingenieros}
                     for ing in lista_ingenieros:
                         turnos_ing = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"]]
@@ -406,14 +398,55 @@ with tab4:
                     
                     registros_nuevos = []
                     
+                    # 4. ITERAR SOBRE BLOQUES Y AUTOCOMPLETAR
                     for b in bloques_validos:
+                        str_fechas_b = [d.strftime("%Y-%m-%d") for d in b['fechas']]
+                        
+                        # Extraer asignaciones manuales específicas para estas fechas
+                        manuales_bloque = [a for a in asigs_restantes if a["fecha"] in str_fechas_b and "MANUAL" in a.get("tipo_dia", "").upper()]
+                        
+                        roles_cubiertos = set()
+                        ing_cubiertos = set()
+                        for m in manuales_bloque:
+                            if "(" in m["tipo_dia"]:
+                                rol = m["tipo_dia"].split("(")[-1].replace(")", "").strip()
+                                roles_cubiertos.add(rol)
+                            ing_cubiertos.add(m["ingeniero_id"])
+
+                        # Determinar matemáticamente qué puestos faltan por llenar
+                        roles_sup_necesarios = []
+                        roles_ing_necesarios = []
+
+                        if b['tipo'] == 'SEMANA':
+                            if "Líder" not in roles_cubiertos: roles_ing_necesarios.append("Líder")
+                            if "Apoyo" not in roles_cubiertos: roles_ing_necesarios.append("Apoyo")
+                        else:
+                            if "Supervisor" not in roles_cubiertos: roles_sup_necesarios.append("Supervisor")
+                            if "Líder" not in roles_cubiertos: roles_ing_necesarios.append("Líder")
+                            
+                            # Cuidar la asignación de apoyos en FDS (que pueden ser Apoyo 1 o Apoyo 2)
+                            apoyos_manuales = sum(1 for r in roles_cubiertos if "Apoyo" in r)
+                            if apoyos_manuales == 0:
+                                roles_ing_necesarios.extend(["Apoyo 1", "Apoyo 2"])
+                            elif apoyos_manuales == 1:
+                                if "Apoyo 1" in roles_cubiertos: roles_ing_necesarios.append("Apoyo 2")
+                                else: roles_ing_necesarios.append("Apoyo 1")
+
+                        # Si el bloque ya está totalmente cubierto a mano, pasamos al siguiente
+                        if not roles_sup_necesarios and not roles_ing_necesarios:
+                            continue
+
                         es_fds = b['tipo'] == 'FDS'
                         es_critico = any((d.month == 12 and d.day in [24, 25, 31]) or (d.month == 1 and d.day == 1) for d in b['fechas'])
                         
                         elegibles_ing = []
                         elegibles_sup = []
                         
+                        # Filtrar personal disponible para los huecos restantes
                         for ing in lista_ingenieros:
+                            # 🚨 REGLA DE ORO: Si ya está manual en este bloque, no lo contamos para los roles automáticos.
+                            if ing["id"] in ing_cubiertos: continue
+
                             ingreso = datetime.strptime(ing.get("fecha_ingreso", "2026-01-01")[:10], "%Y-%m-%d").date()
                             salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
                             
@@ -421,37 +454,42 @@ with tab4:
                             if any(any(datetime.strptime(v["fecha_inicio"], "%Y-%m-%d").date() <= d <= datetime.strptime(v["fecha_fin"], "%Y-%m-%d").date() for v in lista_vacaciones if v["ingeniero_id"] == ing["id"]) for d in b['fechas']): continue
                             if es_fds and not ing.get("permite_fin_semana", True): continue
                             
-                            # ✨ COOLDOWN ESTRICTO: 3 Semanas (~20 días)
+                            # ✨ COOLDOWN ESTRICTO
                             if (b['fechas'][0] - ultimo_turno[ing["id"]]).days <= 20: continue
                             
                             if "Supervisor" in ing.get("rol", ""): elegibles_sup.append(ing)
                             else: elegibles_ing.append(ing)
                                 
                         def seleccionar_mejores(pool, cantidad):
+                            if cantidad == 0: return []
                             if es_critico: pool.sort(key=lambda x: (not x.get("es_nuevo", False), conteo_turnos[x["id"]] / dias_potenciales[x["id"]]))
                             else: pool.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
                             return pool[:cantidad]
 
                         if b['tipo'] == 'SEMANA':
-                            elegidos_ing = seleccionar_mejores(elegibles_ing, 2)
-                            roles_asignar = ["Líder", "Apoyo"]
+                            elegidos_ing = seleccionar_mejores(elegibles_ing, len(roles_ing_necesarios))
+                            roles_asignar = roles_ing_necesarios
                             elegidos_sup = []
                         else:
-                            # 🌟 LOGICA FDS CON SUPERVISORES COMO APOYO
-                            elegidos_sup = seleccionar_mejores(elegibles_sup, 1)
+                            # FDS: Llenar solo lo que falta
+                            elegidos_sup = seleccionar_mejores(elegibles_sup, len(roles_sup_necesarios))
                             sup_id = elegidos_sup[0]["id"] if elegidos_sup else None
                             
-                            elegidos_lider = seleccionar_mejores(elegibles_ing, 1)
+                            necesita_lider = "Líder" in roles_ing_necesarios
+                            elegidos_lider = seleccionar_mejores(elegibles_ing, 1) if necesita_lider else []
                             lider_id = elegidos_lider[0]["id"] if elegidos_lider else None
                             
-                            pool_apoyos = [x for x in elegibles_ing if x["id"] != lider_id] + \
-                                          [x for x in elegibles_sup if x["id"] != sup_id]
-                            
-                            elegidos_apoyos = seleccionar_mejores(pool_apoyos, 2)
-                            
+                            cant_apoyos = sum(1 for r in roles_ing_necesarios if "Apoyo" in r)
+                            elegidos_apoyos = []
+                            if cant_apoyos > 0:
+                                pool_apoyos = [x for x in elegibles_ing if x["id"] != lider_id] + \
+                                              [x for x in elegibles_sup if x["id"] != sup_id]
+                                elegidos_apoyos = seleccionar_mejores(pool_apoyos, cant_apoyos)
+                                
                             elegidos_ing = elegidos_lider + elegidos_apoyos
-                            roles_asignar = ["Líder", "Apoyo 1", "Apoyo 2"]
+                            roles_asignar = roles_ing_necesarios
                             
+                        # Registrar asignaciones calculadas (respetando los manuales existentes)
                         for sup in elegidos_sup:
                             conteo_turnos[sup["id"]] += len(b['fechas'])
                             ultimo_turno[sup["id"]] = b['fechas'][-1]
@@ -467,7 +505,7 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success(f"✅ ¡Se han procesado {len(bloques_validos)} Jornadas exitosamente respetando el Cooldown de 3 Semanas!")
+                        st.success("✅ ¡Jornadas procesadas exitosamente respetando y autocompletando turnos manuales!")
                         st.balloons()
                         st.rerun()
                 except Exception as e:
