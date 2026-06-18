@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 4.2 | Inteligencia Social de Vacaciones y Festivos")
+    st.caption("Versión 4.3 | Control de Roles y Dashboard Expandido")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -104,11 +104,11 @@ with tab1:
         El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
         * **Jornadas Bloqueadas:** No se asigna por día individual. Se asigna un bloque de *Lunes a Jueves (SEMANA)* o de *Viernes a Domingo (FDS)*. Si el lunes es festivo, la jornada FDS se alarga hasta el Lunes.
         * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor).
-        * **Flexibilidad FDS:** 🌟 Un Supervisor principal asume el rol de Supervisor, pero los Supervisores que no fueron elegidos en ese puesto entran a competir como "Apoyo" para blindar la operación.
+        * **Flexibilidad FDS:** 🌟 Un Supervisor asume el rol principal. Los supervisores restantes entran a competir como "Apoyo" (MÁXIMO 1 Supervisor como apoyo por FDS) para blindar la operación.
         * **Equidad Proporcional:** El sistema busca siempre a la persona que tenga la **menor carga porcentual** (Turnos / Días de contrato).
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia.
-        * **Protección Social de Vacaciones:** 🛡️ El sistema no interrumpe fines de semana o festivos adyacentes a tus vacaciones (ej. si acabas vacaciones el Jueves, el Viernes/FDS siguiente queda bloqueado para ti).
-        * **Autocompletado:** El sistema respeta asignaciones manuales, y si un bloque está incompleto, auto-rellena los puestos faltantes.
+        * **Protección Social de Vacaciones:** 🛡️ El sistema no interrumpe fines de semana o festivos adyacentes a tus vacaciones.
+        * **Autocompletado:** El sistema respeta asignaciones manuales y auto-rellena los puestos faltantes.
         """)
     st.markdown("---")
 
@@ -330,7 +330,7 @@ with tab4:
     st.header("⚙️ Motor Algorítmico de Equidad por Jornadas Operativas")
     
     if len(lista_ingenieros) > 0:
-        st.info("💡 **Inteligencia de Datos:** El motor respetará el Cooldown estricto de 3 semanas, autocompletará asignaciones manuales previas, y aplicará la regla de **'Sándwich de Vacaciones'** para proteger puentes y fines de semana adyacentes al descanso.")
+        st.info("💡 **Inteligencia de Datos:** El motor respetará el Cooldown estricto de 3 semanas, autocompletará asignaciones manuales previas, aplicará la regla de 'Sándwich de Vacaciones' y **limitará a máximo 1 supervisor como apoyo en FDS**.")
         
         col_a1, col_a2 = st.columns(2)
         f_inicio_calc = col_a1.date_input("Fecha Inicio Semestre", max(datetime.now().date(), FECHA_MIN), min_value=FECHA_MIN)
@@ -355,12 +355,11 @@ with tab4:
                     
                     asigs_restantes = [a for a in asigs_historicas if a["id"] not in ids_to_delete]
 
-                    # 2. CALCULAR BLOQUES DEL SEMESTRE (Respetando festivos extendidos de Lunes)
+                    # 2. CALCULAR BLOQUES DEL SEMESTRE
                     lunes_guia = f_inicio_calc - timedelta(days=f_inicio_calc.weekday())
                     bloques_validos = []
                     
                     while lunes_guia <= f_fin_calc:
-                        # Para la longitud del bloque seguimos usando la regla del lunes festivo
                         es_lunes_actual_festivo = lunes_guia.strftime("%Y-%m-%d") in festivos_colombia_lista
                         lunes_proximo = lunes_guia + timedelta(days=7)
                         es_lunes_prox_festivo = lunes_proximo.strftime("%Y-%m-%d") in festivos_colombia_lista
@@ -396,7 +395,6 @@ with tab4:
                         salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
                         dias_potenciales[ing["id"]] = max(1, sum(1 for d in [f_inicio_calc + timedelta(days=x) for x in range((f_fin_calc - f_inicio_calc).days + 1)] if ingreso <= d <= salida))
                     
-                    # 🌟 PRE-CALCULAR MAPA DE VACACIONES DE CADA INGENIERO PARA LA "REGLA DE SÁNDWICH"
                     vacaciones_por_ing = {ing["id"]: set() for ing in lista_ingenieros}
                     for v in lista_vacaciones:
                         v_ini = datetime.strptime(v["fecha_inicio"], "%Y-%m-%d").date()
@@ -448,9 +446,8 @@ with tab4:
                         elegibles_ing = []
                         elegibles_sup = []
                         
-                        # Filtrar personal disponible aplicando las nuevas reglas sociales
                         for ing in lista_ingenieros:
-                            if ing["id"] in ing_cubiertos: continue # Ya está asignado manual
+                            if ing["id"] in ing_cubiertos: continue 
 
                             ingreso = datetime.strptime(ing.get("fecha_ingreso", "2026-01-01")[:10], "%Y-%m-%d").date()
                             salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
@@ -461,30 +458,22 @@ with tab4:
                             # ✨ COOLDOWN ESTRICTO
                             if (b['fechas'][0] - ultimo_turno[ing["id"]]).days <= 20: continue
 
-                            # ========================================================
-                            # 🛡️ LÓGICA DE PROTECCIÓN SOCIAL Y "SÁNDWICH"
-                            # ========================================================
+                            # LÓGICA DE PROTECCIÓN SOCIAL Y "SÁNDWICH"
                             dias_vac = vacaciones_por_ing[ing["id"]]
                             fechas_bloque = b['fechas']
                             
-                            # 1. ¿Está oficialmente de vacaciones durante el bloque?
                             en_vacaciones_directas = any(d in dias_vac for d in fechas_bloque)
-                            
-                            # 2. Adyacencia: ¿Vacaciones justo antes o justo después?
                             dia_antes = fechas_bloque[0] - timedelta(days=1)
                             dia_despues = fechas_bloque[-1] + timedelta(days=1)
                             
-                            # 3. Sándwich: El día antes es Festivo, ¿y el anterior a ese es vacación?
                             dia_antes_2 = dia_antes - timedelta(days=1)
                             es_sandwich_antes = (dia_antes.strftime("%Y-%m-%d") in festivos_colombia_lista) and (dia_antes_2 in dias_vac)
                             
                             dia_despues_2 = dia_despues + timedelta(days=1)
                             es_sandwich_despues = (dia_despues.strftime("%Y-%m-%d") in festivos_colombia_lista) and (dia_despues_2 in dias_vac)
 
-                            # Si cumple CUALQUIERA de estas condiciones, bloqueamos su asignación
                             if en_vacaciones_directas or (dia_antes in dias_vac) or (dia_despues in dias_vac) or es_sandwich_antes or es_sandwich_despues:
                                 continue 
-                            # ========================================================
                             
                             if "Supervisor" in ing.get("rol", ""): elegibles_sup.append(ing)
                             else: elegibles_ing.append(ing)
@@ -509,10 +498,29 @@ with tab4:
                             
                             cant_apoyos = sum(1 for r in roles_ing_necesarios if "Apoyo" in r)
                             elegidos_apoyos = []
+                            
+                            # 🚨 NUEVA REGLA: MÁXIMO 1 SUPERVISOR COMO APOYO EN FDS
                             if cant_apoyos > 0:
                                 pool_apoyos = [x for x in elegibles_ing if x["id"] != lider_id] + \
                                               [x for x in elegibles_sup if x["id"] != sup_id]
-                                elegidos_apoyos = seleccionar_mejores(pool_apoyos, cant_apoyos)
+                                
+                                # Ordenar a todos por equidad
+                                if es_critico: 
+                                    pool_apoyos.sort(key=lambda x: (not x.get("es_nuevo", False), conteo_turnos[x["id"]] / dias_potenciales[x["id"]]))
+                                else: 
+                                    pool_apoyos.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
+                                
+                                sups_asignados_como_apoyo = 0
+                                for cand in pool_apoyos:
+                                    if len(elegidos_apoyos) == cant_apoyos: break
+                                    
+                                    es_candidato_sup = "Supervisor" in cand.get("rol", "")
+                                    if es_candidato_sup:
+                                        if sups_asignados_como_apoyo < 1:
+                                            elegidos_apoyos.append(cand)
+                                            sups_asignados_como_apoyo += 1
+                                    else:
+                                        elegidos_apoyos.append(cand)
                                 
                             elegidos_ing = elegidos_lider + elegidos_apoyos
                             roles_asignar = roles_ing_necesarios
@@ -533,7 +541,7 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Jornadas procesadas exitosamente aplicando la nueva Inteligencia Social de Vacaciones y autocompletando turnos!")
+                        st.success("✅ ¡Jornadas procesadas exitosamente respetando límite de supervisores como apoyo y reglas de vacaciones!")
                         st.balloons()
                         st.rerun()
                 except Exception as e:
@@ -558,13 +566,11 @@ with tab5:
         # -------------------------------------------------------------
         # 🎯 LÓGICA AVANZADA: CÁLCULO DE "TURNOS" (BLOQUES CONTINUOS)
         # -------------------------------------------------------------
-        # Si la diferencia entre fechas de un mismo tipo es mayor a 1 día, es un nuevo turno/bloque.
         df_asig['Dias_Dif'] = df_asig.groupby(['Nombre', 'Categoria'])['Fecha_dt'].diff().dt.days
         df_asig['Nuevo_Turno'] = (df_asig['Dias_Dif'] > 1).astype(int)
-        df_asig['Nuevo_Turno'] = df_asig['Nuevo_Turno'].fillna(1) # El primer registro siempre es un nuevo turno
+        df_asig['Nuevo_Turno'] = df_asig['Nuevo_Turno'].fillna(1) 
         df_asig['ID_Bloque'] = df_asig.groupby(['Nombre', 'Categoria'])['Nuevo_Turno'].cumsum()
         
-        # Agrupamos por los bloques creados para contar cuántos turnos reales hizo cada persona
         df_turnos_agrupados = df_asig.groupby(['Nombre', 'Categoria', 'ID_Bloque']).size().reset_index(name='Dias_en_Turno')
         conteo_turnos_reales = df_turnos_agrupados.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
 
@@ -620,7 +626,8 @@ with tab5:
             st.info("No hay registros de ausentismos para analizar en este momento.")
 
         st.markdown("---")
-        st.markdown("### 📊 3. Resumen Tabular Comparativo")
+        # Cambio de título para ser explícitos respecto a Semana y FDS
+        st.markdown("### 📊 3. Resumen de Turnos (Semana vs. Fin de Semana)")
         col_t1, col_t2 = st.columns([1, 2])
 
         with col_t1:
@@ -635,6 +642,20 @@ with tab5:
                 if col not in resumen_pivot.columns: resumen_pivot[col] = 0
             resumen_pivot['TOTAL DÍAS'] = resumen_pivot['SEMANA'] + resumen_pivot['FDS'] + resumen_pivot['MANUAL']
             st.dataframe(resumen_pivot.sort_values(by="TOTAL DÍAS", ascending=False), use_container_width=True)
+            
+        st.markdown("---")
+        st.markdown("### 🎭 4. Distribución por Rol Específico")
+        st.caption("Aquí puedes auditar equidad de funciones: cuántas veces ha estado alguien como Líder, Apoyo o Supervisor.")
+        
+        # Limpieza y agrupación de roles
+        df_asig['Rol_Limpio'] = df_asig['tipo_dia'].apply(lambda x: x.split('(')[-1].replace(')', '').strip() if '(' in x else x)
+        df_asig['Rol_Limpio'] = df_asig['Rol_Limpio'].replace({"Apoyo 1": "Apoyo", "Apoyo 2": "Apoyo"})
+        
+        conteo_roles = df_asig.groupby(['Nombre', 'Rol_Limpio']).size().reset_index(name='Cantidad')
+        pivot_roles = conteo_roles.pivot(index='Nombre', columns='Rol_Limpio', values='Cantidad').fillna(0).astype(int)
+        
+        pivot_roles['TOTAL FUNCIONES'] = pivot_roles.sum(axis=1)
+        st.dataframe(pivot_roles.sort_values(by="TOTAL FUNCIONES", ascending=False), use_container_width=True)
 
 # ==========================================
 # 🔄 PESTAÑA 6: RELEVOS Y ASIGNACIÓN MANUAL
