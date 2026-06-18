@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 4.4 | Equidad de Roles y Control de Ejecución")
+    st.caption("Versión 4.5 | Control Estricto de Rol Supervisor")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -104,7 +104,7 @@ with tab1:
         El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
         * **Jornadas Bloqueadas:** No se asigna por día individual. Se asigna un bloque de *Lunes a Jueves (SEMANA)* o de *Viernes a Domingo (FDS)*. Si el lunes es festivo, la jornada FDS se alarga hasta el Lunes.
         * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor).
-        * **Flexibilidad FDS:** 🌟 Un Supervisor asume el rol principal. Los supervisores restantes entran a competir como "Apoyo" (MÁXIMO 1 Supervisor como apoyo por FDS) para blindar la operación.
+        * **Restricción Supervisores:** Operan SÓLO fines de semana. Pueden ser "Supervisor" o "Apoyo" (Máximo 1 por FDS), pero JAMÁS pueden ser "Líder".
         * **Equidad de Carga y Roles:** El sistema busca siempre a la persona con **menor carga porcentual**. Además, balancea internamente quién es Líder y quién es Apoyo basado en su historial de roles.
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia.
         * **Protección Social de Vacaciones:** 🛡️ El sistema no interrumpe fines de semana o festivos adyacentes a tus vacaciones.
@@ -523,30 +523,36 @@ with tab4:
                         elegidos_ing_crudos = seleccionar_mejores(elegibles_para_ing, cant_ing_necesarios)
                         
                         asignaciones_finales_bloque = []
-                        
-                        # Mapear roles a ingenieros priorizando a quien haya sido menos veces "Líder"
                         pool_roles_asignar = roles_ing_necesarios.copy()
-                        pool_ingenieros_disponibles = elegidos_ing_crudos.copy()
                         
+                        # Separar la bolsa para garantizar que el Líder NO sea supervisor
+                        candidatos_lider = [x for x in elegidos_ing_crudos if "Supervisor" not in x.get("rol", "")]
+                        candidatos_apoyo = [x for x in elegidos_ing_crudos] # Inicialmente todos, luego se remueve el elegido
+                        
+                        # 1. Asignar Líderes primero (restringido a Ingenieros)
                         for r_necesario in list(pool_roles_asignar):
-                            if not pool_ingenieros_disponibles: break
-                            
                             if "Líder" in r_necesario:
-                                # Ordenar por el que menos ha sido Líder
-                                pool_ingenieros_disponibles.sort(key=lambda x: conteo_roles_hist[x["id"]]["Líder"])
-                                ing_seleccionado = pool_ingenieros_disponibles.pop(0)
-                                conteo_roles_hist[ing_seleccionado["id"]]["Líder"] += 1
-                                asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
-                                pool_roles_asignar.remove(r_necesario)
+                                if candidatos_lider:
+                                    # Ordenar por el que menos ha sido Líder
+                                    candidatos_lider.sort(key=lambda x: conteo_roles_hist[x["id"]]["Líder"])
+                                    ing_seleccionado = candidatos_lider.pop(0)
+                                    # Retirarlo de los candidatos para Apoyo
+                                    candidatos_apoyo = [x for x in candidatos_apoyo if x["id"] != ing_seleccionado["id"]]
+                                    
+                                    conteo_roles_hist[ing_seleccionado["id"]]["Líder"] += 1
+                                    asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
+                                    pool_roles_asignar.remove(r_necesario)
 
-                        # Para los roles de Apoyo restantes
+                        # 2. Asignar Apoyos restantes (Ingenieros y el posible Supervisor permitido)
                         for r_necesario in list(pool_roles_asignar):
-                            if not pool_ingenieros_disponibles: break
                             if "Apoyo" in r_necesario:
-                                pool_ingenieros_disponibles.sort(key=lambda x: conteo_roles_hist[x["id"]]["Apoyo"])
-                                ing_seleccionado = pool_ingenieros_disponibles.pop(0)
-                                conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
-                                asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
+                                if candidatos_apoyo:
+                                    # Ordenar por el que menos ha sido Apoyo
+                                    candidatos_apoyo.sort(key=lambda x: conteo_roles_hist[x["id"]]["Apoyo"])
+                                    ing_seleccionado = candidatos_apoyo.pop(0)
+                                    
+                                    conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
+                                    asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
                             
                         # Guardar resultados
                         for sup in elegidos_sup:
@@ -563,7 +569,7 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Jornadas procesadas exitosamente aplicando la Equidad de Roles y manteniendo tus preferencias de ejecución!")
+                        st.success("✅ ¡Jornadas procesadas exitosamente aplicando la Equidad de Roles estricta (Sin Supervisores como Líderes)!")
                         st.balloons()
                         st.rerun()
                     elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango, incluyendo los manuales, y calcula desde cero)":
