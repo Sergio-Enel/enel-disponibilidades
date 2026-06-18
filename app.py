@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 4.5 | Control Estricto de Rol Supervisor")
+    st.caption("Versión 4.6 | Balance Porcentual de Roles")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -105,7 +105,7 @@ with tab1:
         * **Jornadas Bloqueadas:** No se asigna por día individual. Se asigna un bloque de *Lunes a Jueves (SEMANA)* o de *Viernes a Domingo (FDS)*. Si el lunes es festivo, la jornada FDS se alarga hasta el Lunes.
         * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor).
         * **Restricción Supervisores:** Operan SÓLO fines de semana. Pueden ser "Supervisor" o "Apoyo" (Máximo 1 por FDS), pero JAMÁS pueden ser "Líder".
-        * **Equidad de Carga y Roles:** El sistema busca siempre a la persona con **menor carga porcentual**. Además, balancea internamente quién es Líder y quién es Apoyo basado en su historial de roles.
+        * **Equidad Porcentual de Roles:** ⚖️ Para evitar sesgos, el sistema ya no solo cuenta cuántas veces fuiste Líder/Apoyo, sino qué *porcentaje* de tu vida operativa representa. Quien tenga el menor ratio porcentual de su rol correspondiente, será el elegido para ocuparlo.
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia.
         * **Protección Social de Vacaciones:** 🛡️ El sistema no interrumpe fines de semana o festivos adyacentes a tus vacaciones.
         """)
@@ -346,7 +346,7 @@ with tab4:
         )
 
         if st.button("🚀 Optimizar y Asignar por Jornadas", use_container_width=True):
-            with st.spinner("Construyendo jornadas y balanceando roles equitativamente..."):
+            with st.spinner("Construyendo jornadas y balanceando roles de forma equitativa y porcentual..."):
                 try:
                     # 1. RECUPERAR TODO EL HISTORIAL Y FILTRAR SEGÚN EL MODO DE EJECUCIÓN
                     asigs_historicas = supabase.table("asignaciones").select("*").execute().data
@@ -395,7 +395,7 @@ with tab4:
 
                     # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN (Performance, Equidad Operativa y ROLES)
                     conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros}
-                    conteo_roles_hist = {ing["id"]: {"Líder": 0, "Apoyo": 0} for ing in lista_ingenieros}
+                    conteo_roles_hist = {ing["id"]: {"Líder": 0, "Apoyo": 0, "Supervisor": 0} for ing in lista_ingenieros}
                     
                     for a in asigs_restantes:
                         if a["ingeniero_id"] in conteo_turnos:
@@ -505,21 +505,35 @@ with tab4:
                             return pool[:cantidad]
 
                         # SELECCIÓN Y ASIGNACIÓN INTELIGENTE DE ROLES
-                        elegidos_sup = seleccionar_mejores(elegibles_sup, len(roles_sup_necesarios))
-                        
-                        cant_ing_necesarios = len([r for r in roles_ing_necesarios if "Líder" in r or "Apoyo" in r])
+                        elegidos_sup = []
                         elegibles_para_ing = elegibles_ing.copy()
                         
-                        # Si es FDS y se requieren apoyos, añadimos los supervisores sobrantes con restricción (Máx 1)
+                        # Manejo de roles para Supervisores (Balance Porcentual Supervisor vs Apoyo)
                         if es_fds:
-                            sup_asignado = elegidos_sup[0]["id"] if elegidos_sup else None
-                            sups_restantes = [x for x in elegibles_sup if x["id"] != sup_asignado]
+                            cant_apoyos_necesarios = sum(1 for r in roles_ing_necesarios if "Apoyo" in r)
                             
-                            if sups_restantes:
-                                # Prioridad a los que menos turnos tienen
-                                sups_restantes.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
-                                elegibles_para_ing.append(sups_restantes[0]) # Máximo 1 supervisor a la bolsa de elegibles como apoyo
-                        
+                            if roles_sup_necesarios:
+                                # Primero ordenamos a todos los supervisores disponibles por su necesidad de turnos GLOBALES
+                                sups_ordenados_turnos = seleccionar_mejores(elegibles_sup, len(elegibles_sup))
+                                
+                                if cant_apoyos_necesarios > 0 and len(sups_ordenados_turnos) >= 2:
+                                    # Si necesitamos apoyo y tenemos al menos 2 supervisores disponibles, agarramos los 2 que más turnos necesitan
+                                    top_2_sups = sups_ordenados_turnos[:2]
+                                    # Ahora decidimos el ROL basándonos en el RATIO PORCENTUAL de su historia
+                                    top_2_sups.sort(key=lambda x: conteo_roles_hist[x["id"]]["Supervisor"] / max(1, conteo_turnos[x["id"]]))
+                                    
+                                    # El que menos ha sido Supervisor (porcentualmente), asume el mando.
+                                    elegidos_sup = [top_2_sups[0]]
+                                    conteo_roles_hist[top_2_sups[0]["id"]]["Supervisor"] += 1
+                                    
+                                    # El otro baja al pool general para competir como "Apoyo"
+                                    elegibles_para_ing.append(top_2_sups[1])
+                                elif len(sups_ordenados_turnos) > 0:
+                                    elegidos_sup = [sups_ordenados_turnos[0]]
+                                    conteo_roles_hist[sups_ordenados_turnos[0]["id"]]["Supervisor"] += 1
+
+                        # Selección base de Ingenieros por cantidad global
+                        cant_ing_necesarios = len([r for r in roles_ing_necesarios if "Líder" in r or "Apoyo" in r])
                         elegidos_ing_crudos = seleccionar_mejores(elegibles_para_ing, cant_ing_necesarios)
                         
                         asignaciones_finales_bloque = []
@@ -529,13 +543,14 @@ with tab4:
                         candidatos_lider = [x for x in elegidos_ing_crudos if "Supervisor" not in x.get("rol", "")]
                         candidatos_apoyo = [x for x in elegidos_ing_crudos] # Inicialmente todos, luego se remueve el elegido
                         
-                        # 1. Asignar Líderes primero (restringido a Ingenieros)
+                        # 1. Asignar Líderes basándose en el RATIO PORCENTUAL de Líder
                         for r_necesario in list(pool_roles_asignar):
                             if "Líder" in r_necesario:
                                 if candidatos_lider:
-                                    # Ordenar por el que menos ha sido Líder
-                                    candidatos_lider.sort(key=lambda x: conteo_roles_hist[x["id"]]["Líder"])
+                                    # Ordenar por el porcentaje de veces que ha sido Líder y protegiendo a los "Nuevos"
+                                    candidatos_lider.sort(key=lambda x: (x.get("es_nuevo", False), conteo_roles_hist[x["id"]]["Líder"] / max(1, conteo_turnos[x["id"]])))
                                     ing_seleccionado = candidatos_lider.pop(0)
+                                    
                                     # Retirarlo de los candidatos para Apoyo
                                     candidatos_apoyo = [x for x in candidatos_apoyo if x["id"] != ing_seleccionado["id"]]
                                     
@@ -543,12 +558,12 @@ with tab4:
                                     asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
                                     pool_roles_asignar.remove(r_necesario)
 
-                        # 2. Asignar Apoyos restantes (Ingenieros y el posible Supervisor permitido)
+                        # 2. Asignar Apoyos restantes
                         for r_necesario in list(pool_roles_asignar):
                             if "Apoyo" in r_necesario:
                                 if candidatos_apoyo:
-                                    # Ordenar por el que menos ha sido Apoyo
-                                    candidatos_apoyo.sort(key=lambda x: conteo_roles_hist[x["id"]]["Apoyo"])
+                                    # Ordenar por el porcentaje de veces que ha sido Apoyo
+                                    candidatos_apoyo.sort(key=lambda x: conteo_roles_hist[x["id"]]["Apoyo"] / max(1, conteo_turnos[x["id"]]))
                                     ing_seleccionado = candidatos_apoyo.pop(0)
                                     
                                     conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
@@ -569,7 +584,7 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Jornadas procesadas exitosamente aplicando la Equidad de Roles estricta (Sin Supervisores como Líderes)!")
+                        st.success("✅ ¡Jornadas procesadas exitosamente aplicando la Equidad Porcentual estricta para todos los roles!")
                         st.balloons()
                         st.rerun()
                     elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango, incluyendo los manuales, y calcula desde cero)":
