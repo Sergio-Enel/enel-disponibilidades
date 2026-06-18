@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 4.3 | Control de Roles y Dashboard Expandido")
+    st.caption("Versión 4.4 | Equidad de Roles y Control de Ejecución")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -105,10 +105,9 @@ with tab1:
         * **Jornadas Bloqueadas:** No se asigna por día individual. Se asigna un bloque de *Lunes a Jueves (SEMANA)* o de *Viernes a Domingo (FDS)*. Si el lunes es festivo, la jornada FDS se alarga hasta el Lunes.
         * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor).
         * **Flexibilidad FDS:** 🌟 Un Supervisor asume el rol principal. Los supervisores restantes entran a competir como "Apoyo" (MÁXIMO 1 Supervisor como apoyo por FDS) para blindar la operación.
-        * **Equidad Proporcional:** El sistema busca siempre a la persona que tenga la **menor carga porcentual** (Turnos / Días de contrato).
+        * **Equidad de Carga y Roles:** El sistema busca siempre a la persona con **menor carga porcentual**. Además, balancea internamente quién es Líder y quién es Apoyo basado en su historial de roles.
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia.
         * **Protección Social de Vacaciones:** 🛡️ El sistema no interrumpe fines de semana o festivos adyacentes a tus vacaciones.
-        * **Autocompletado:** El sistema respeta asignaciones manuales y auto-rellena los puestos faltantes.
         """)
     st.markdown("---")
 
@@ -330,28 +329,44 @@ with tab4:
     st.header("⚙️ Motor Algorítmico de Equidad por Jornadas Operativas")
     
     if len(lista_ingenieros) > 0:
-        st.info("💡 **Inteligencia de Datos:** El motor respetará el Cooldown estricto de 3 semanas, autocompletará asignaciones manuales previas, aplicará la regla de 'Sándwich de Vacaciones' y **limitará a máximo 1 supervisor como apoyo en FDS**.")
-        
         col_a1, col_a2 = st.columns(2)
         f_inicio_calc = col_a1.date_input("Fecha Inicio Semestre", max(datetime.now().date(), FECHA_MIN), min_value=FECHA_MIN)
         f_fin_calc = col_a2.date_input("Fecha Fin Semestre", max(datetime.now().date() + timedelta(days=180), FECHA_MIN), min_value=FECHA_MIN)
 
-        if st.button("🚀 Optimizar y Asignar por Jornadas"):
-            with st.spinner("Construyendo jornadas y seleccionando personal..."):
+        st.markdown("---")
+        st.subheader("Opciones de Ejecución del Algoritmo")
+        modo_ejecucion = st.radio(
+            "Selecciona qué debe hacer el algoritmo con los turnos que ya existen en ese rango de fechas:", 
+            [
+                "🛠️ Mantener Manuales y Recalcular Automáticos (Recomendado)",
+                "🧩 Rellenar Huecos (Mantiene TODOS los turnos actuales y solo llena donde falta alguien)",
+                "⚠️ Sobrescribir TODO (Borra todos los turnos del rango, incluyendo los manuales, y calcula desde cero)"
+            ],
+            index=0
+        )
+
+        if st.button("🚀 Optimizar y Asignar por Jornadas", use_container_width=True):
+            with st.spinner("Construyendo jornadas y balanceando roles equitativamente..."):
                 try:
-                    # 1. RECUPERAR TODO EL HISTORIAL Y BORRAR SÓLO LAS AUTOMÁTICAS
+                    # 1. RECUPERAR TODO EL HISTORIAL Y FILTRAR SEGÚN EL MODO DE EJECUCIÓN
                     asigs_historicas = supabase.table("asignaciones").select("*").execute().data
                     ids_to_delete = []
                     
                     for a in asigs_historicas:
                         fecha_a = datetime.strptime(a["fecha"], "%Y-%m-%d").date()
                         if f_inicio_calc <= fecha_a <= f_fin_calc:
-                            # Si no es manual, se borra para re-calcular
-                            if "MANUAL" not in a.get("tipo_dia", "").upper():
-                                ids_to_delete.append(a["id"])
-
-                    for i in range(0, len(ids_to_delete), 100):
-                        supabase.table("asignaciones").delete().in_("id", ids_to_delete[i:i+100]).execute()
+                            if "🧩" in modo_ejecucion:
+                                pass # No borra nada, mantiene todo.
+                            elif "🛠️" in modo_ejecucion:
+                                if "MANUAL" not in a.get("tipo_dia", "").upper():
+                                    ids_to_delete.append(a["id"]) # Borra automáticos
+                            elif "⚠️" in modo_ejecucion:
+                                ids_to_delete.append(a["id"]) # Borra absolutamente todo
+                                
+                    # Ejecutar borrado en lotes
+                    if ids_to_delete:
+                        for i in range(0, len(ids_to_delete), 100):
+                            supabase.table("asignaciones").delete().in_("id", ids_to_delete[i:i+100]).execute()
                     
                     asigs_restantes = [a for a in asigs_historicas if a["id"] not in ids_to_delete]
 
@@ -378,11 +393,18 @@ with tab4:
                             
                         lunes_guia = lunes_proximo
 
-                    # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN (Performance y Equidad)
+                    # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN (Performance, Equidad Operativa y ROLES)
                     conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros}
+                    conteo_roles_hist = {ing["id"]: {"Líder": 0, "Apoyo": 0} for ing in lista_ingenieros}
+                    
                     for a in asigs_restantes:
                         if a["ingeniero_id"] in conteo_turnos:
                             conteo_turnos[a["ingeniero_id"]] += 1
+                            # Lógica para contar roles históricos
+                            rol_limpio = a.get("tipo_dia", "").split("(")[-1].replace(")", "").strip()
+                            if "Apoyo" in rol_limpio: rol_limpio = "Apoyo"
+                            if rol_limpio in conteo_roles_hist[a["ingeniero_id"]]:
+                                conteo_roles_hist[a["ingeniero_id"]][rol_limpio] += 1
                             
                     ultimo_turno = {ing["id"]: f_inicio_calc - timedelta(days=50) for ing in lista_ingenieros}
                     for ing in lista_ingenieros:
@@ -409,8 +431,7 @@ with tab4:
                     for b in bloques_validos:
                         str_fechas_b = [d.strftime("%Y-%m-%d") for d in b['fechas']]
                         
-                        # Extraer asignaciones manuales
-                        manuales_bloque = [a for a in asigs_restantes if a["fecha"] in str_fechas_b and "MANUAL" in a.get("tipo_dia", "").upper()]
+                        manuales_bloque = [a for a in asigs_restantes if a["fecha"] in str_fechas_b]
                         roles_cubiertos = set()
                         ing_cubiertos = set()
                         for m in manuales_bloque:
@@ -455,7 +476,6 @@ with tab4:
                             if not all(ingreso <= d <= salida for d in b['fechas']): continue
                             if es_fds and not ing.get("permite_fin_semana", True): continue
                             
-                            # ✨ COOLDOWN ESTRICTO
                             if (b['fechas'][0] - ultimo_turno[ing["id"]]).days <= 20: continue
 
                             # LÓGICA DE PROTECCIÓN SOCIAL Y "SÁNDWICH"
@@ -484,46 +504,49 @@ with tab4:
                             else: pool.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
                             return pool[:cantidad]
 
-                        if b['tipo'] == 'SEMANA':
-                            elegidos_ing = seleccionar_mejores(elegibles_ing, len(roles_ing_necesarios))
-                            roles_asignar = roles_ing_necesarios
-                            elegidos_sup = []
-                        else:
-                            elegidos_sup = seleccionar_mejores(elegibles_sup, len(roles_sup_necesarios))
-                            sup_id = elegidos_sup[0]["id"] if elegidos_sup else None
+                        # SELECCIÓN Y ASIGNACIÓN INTELIGENTE DE ROLES
+                        elegidos_sup = seleccionar_mejores(elegibles_sup, len(roles_sup_necesarios))
+                        
+                        cant_ing_necesarios = len([r for r in roles_ing_necesarios if "Líder" in r or "Apoyo" in r])
+                        elegibles_para_ing = elegibles_ing.copy()
+                        
+                        # Si es FDS y se requieren apoyos, añadimos los supervisores sobrantes con restricción (Máx 1)
+                        if es_fds:
+                            sup_asignado = elegidos_sup[0]["id"] if elegidos_sup else None
+                            sups_restantes = [x for x in elegibles_sup if x["id"] != sup_asignado]
                             
-                            necesita_lider = "Líder" in roles_ing_necesarios
-                            elegidos_lider = seleccionar_mejores(elegibles_ing, 1) if necesita_lider else []
-                            lider_id = elegidos_lider[0]["id"] if elegidos_lider else None
+                            if sups_restantes:
+                                # Prioridad a los que menos turnos tienen
+                                sups_restantes.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
+                                elegibles_para_ing.append(sups_restantes[0]) # Máximo 1 supervisor a la bolsa de elegibles como apoyo
+                        
+                        elegidos_ing_crudos = seleccionar_mejores(elegibles_para_ing, cant_ing_necesarios)
+                        
+                        asignaciones_finales_bloque = []
+                        
+                        # Mapear roles a ingenieros priorizando a quien haya sido menos veces "Líder"
+                        pool_roles_asignar = roles_ing_necesarios.copy()
+                        pool_ingenieros_disponibles = elegidos_ing_crudos.copy()
+                        
+                        for r_necesario in list(pool_roles_asignar):
+                            if not pool_ingenieros_disponibles: break
                             
-                            cant_apoyos = sum(1 for r in roles_ing_necesarios if "Apoyo" in r)
-                            elegidos_apoyos = []
-                            
-                            # 🚨 NUEVA REGLA: MÁXIMO 1 SUPERVISOR COMO APOYO EN FDS
-                            if cant_apoyos > 0:
-                                pool_apoyos = [x for x in elegibles_ing if x["id"] != lider_id] + \
-                                              [x for x in elegibles_sup if x["id"] != sup_id]
-                                
-                                # Ordenar a todos por equidad
-                                if es_critico: 
-                                    pool_apoyos.sort(key=lambda x: (not x.get("es_nuevo", False), conteo_turnos[x["id"]] / dias_potenciales[x["id"]]))
-                                else: 
-                                    pool_apoyos.sort(key=lambda x: conteo_turnos[x["id"]] / dias_potenciales[x["id"]])
-                                
-                                sups_asignados_como_apoyo = 0
-                                for cand in pool_apoyos:
-                                    if len(elegidos_apoyos) == cant_apoyos: break
-                                    
-                                    es_candidato_sup = "Supervisor" in cand.get("rol", "")
-                                    if es_candidato_sup:
-                                        if sups_asignados_como_apoyo < 1:
-                                            elegidos_apoyos.append(cand)
-                                            sups_asignados_como_apoyo += 1
-                                    else:
-                                        elegidos_apoyos.append(cand)
-                                
-                            elegidos_ing = elegidos_lider + elegidos_apoyos
-                            roles_asignar = roles_ing_necesarios
+                            if "Líder" in r_necesario:
+                                # Ordenar por el que menos ha sido Líder
+                                pool_ingenieros_disponibles.sort(key=lambda x: conteo_roles_hist[x["id"]]["Líder"])
+                                ing_seleccionado = pool_ingenieros_disponibles.pop(0)
+                                conteo_roles_hist[ing_seleccionado["id"]]["Líder"] += 1
+                                asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
+                                pool_roles_asignar.remove(r_necesario)
+
+                        # Para los roles de Apoyo restantes
+                        for r_necesario in list(pool_roles_asignar):
+                            if not pool_ingenieros_disponibles: break
+                            if "Apoyo" in r_necesario:
+                                pool_ingenieros_disponibles.sort(key=lambda x: conteo_roles_hist[x["id"]]["Apoyo"])
+                                ing_seleccionado = pool_ingenieros_disponibles.pop(0)
+                                conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
+                                asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
                             
                         # Guardar resultados
                         for sup in elegidos_sup:
@@ -532,8 +555,7 @@ with tab4:
                             for dia in b['fechas']:
                                 registros_nuevos.append({"fecha": str(dia), "ingeniero_id": sup["id"], "tipo_dia": f"FDS (Supervisor)"})
 
-                        for i, ing in enumerate(elegidos_ing):
-                            rol_asignado = roles_asignar[i] if i < len(roles_asignar) else "Apoyo"
+                        for ing, rol_asignado in asignaciones_finales_bloque:
                             conteo_turnos[ing["id"]] += len(b['fechas'])
                             ultimo_turno[ing["id"]] = b['fechas'][-1] 
                             for dia in b['fechas']:
@@ -541,9 +563,12 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Jornadas procesadas exitosamente respetando límite de supervisores como apoyo y reglas de vacaciones!")
+                        st.success("✅ ¡Jornadas procesadas exitosamente aplicando la Equidad de Roles y manteniendo tus preferencias de ejecución!")
                         st.balloons()
                         st.rerun()
+                    elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango, incluyendo los manuales, y calcula desde cero)":
+                        st.info("No se encontraron jornadas vacías para asignar en este rango.")
+                        
                 except Exception as e:
                     st.error(f"Error procesando el motor: {e}")
 
@@ -626,7 +651,6 @@ with tab5:
             st.info("No hay registros de ausentismos para analizar en este momento.")
 
         st.markdown("---")
-        # Cambio de título para ser explícitos respecto a Semana y FDS
         st.markdown("### 📊 3. Resumen de Turnos (Semana vs. Fin de Semana)")
         col_t1, col_t2 = st.columns([1, 2])
 
@@ -652,10 +676,22 @@ with tab5:
         df_asig['Rol_Limpio'] = df_asig['Rol_Limpio'].replace({"Apoyo 1": "Apoyo", "Apoyo 2": "Apoyo"})
         
         conteo_roles = df_asig.groupby(['Nombre', 'Rol_Limpio']).size().reset_index(name='Cantidad')
-        pivot_roles = conteo_roles.pivot(index='Nombre', columns='Rol_Limpio', values='Cantidad').fillna(0).astype(int)
         
-        pivot_roles['TOTAL FUNCIONES'] = pivot_roles.sum(axis=1)
-        st.dataframe(pivot_roles.sort_values(by="TOTAL FUNCIONES", ascending=False), use_container_width=True)
+        col_r1, col_r2 = st.columns([2, 1])
+        with col_r1:
+            fig_roles = px.bar(
+                conteo_roles, x='Nombre', y='Cantidad', color='Rol_Limpio',
+                title="Gráfica de Participación por Rol",
+                color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100"},
+                barmode='group', text_auto=True
+            )
+            st.plotly_chart(fig_roles, use_container_width=True)
+            
+        with col_r2:
+            st.caption("Matriz Exacta por Roles")
+            pivot_roles = conteo_roles.pivot(index='Nombre', columns='Rol_Limpio', values='Cantidad').fillna(0).astype(int)
+            pivot_roles['TOTAL FUNCIONES'] = pivot_roles.sum(axis=1)
+            st.dataframe(pivot_roles.sort_values(by="TOTAL FUNCIONES", ascending=False), use_container_width=True)
 
 # ==========================================
 # 🔄 PESTAÑA 6: RELEVOS Y ASIGNACIÓN MANUAL
@@ -696,12 +732,12 @@ with tab6:
                 st.error("⚠️ Selecciona al menos una fecha.")
     
     with col_r2:
-        st.subheader("🔄 Modificar / Relevo de Turno")
-        st.markdown("Modifica quién asiste a un turno que **ya existe** en el calendario.")
+        st.subheader("🔄 Modificar o Cancelar Turno")
+        st.markdown("Reemplaza a una persona en un turno existente, o simplemente elimina su disponibilidad.")
         if len(lista_asignaciones) == 0:
             st.info("ℹ️ No hay turnos asignados aún.")
         else:
-            fecha_relevo = st.date_input("1. Selecciona la fecha a modificar:", min_value=FECHA_MIN)
+            fecha_relevo = st.date_input("1. Selecciona la fecha:", min_value=FECHA_MIN)
             str_fecha_rel = str(fecha_relevo)
             
             turnos_dia = [a for a in lista_asignaciones if a["fecha"] == str_fecha_rel]
@@ -715,14 +751,30 @@ with tab6:
                     rol_t = t.get('tipo_dia', 'DISPONIBLE')
                     opciones_turno.append(f"{t['id']} - {nom} ({rol_t})")
                 
-                turno_sel = st.selectbox("2. Quién entrega el turno:", opciones_turno)
+                turno_sel = st.selectbox("2. Turno objetivo (a modificar o cancelar):", opciones_turno)
                 id_asig_cambiar = int(turno_sel.split("-")[0].strip())
-                nuevo_ing = st.selectbox("3. Quién toma el relevo:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})")
                 
+                st.markdown("---")
+                
+                # Opción de Relevo
+                st.markdown("**Opción A: Relevo (Cambiar Persona)**")
+                nuevo_ing = st.selectbox("Quién toma el relevo:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})")
                 if st.button("🔄 Ejecutar Relevo", use_container_width=True):
                     try:
                         supabase.table("asignaciones").update({"ingeniero_id": nuevo_ing["id"]}).eq("id", id_asig_cambiar).execute()
                         st.success(f"✅ ¡Relevo exitoso! {nuevo_ing['nombre']} ha tomado el turno.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # Opción de Borrar
+                st.markdown("**Opción B: Eliminar Disponibilidad**")
+                if st.button("❌ Cancelar Turno Seleccionado", use_container_width=True):
+                    try:
+                        supabase.table("asignaciones").delete().eq("id", id_asig_cambiar).execute()
+                        st.success("✅ Turno cancelado y eliminado correctamente.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
