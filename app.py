@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 4.8 | Flexibilidad Sups y Métricas Reales")
+    st.caption("Versión 4.9 | Supervisores solo FDS y Métricas por Turno")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -105,7 +105,7 @@ with tab1:
         El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
         * **Jornadas Bloqueadas:** Se manejan bloques de *Despacho (Lun-Vie)*, *Semana (Lun-Jue)* o *Fin de Semana (Vie-Dom)*.
         * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor). Despacho toma 1 Ingeniero exclusivo.
-        * **Restricción Supervisores:** Operan SÓLO fines de semana. Tratan de no repetir fines de semana seguidos, pero pueden hacerlo como **última opción** si es necesario para cubrir el turno.
+        * **Restricción Supervisores:** Operan SÓLO fines de semana. Jamás entre semana. Tratan de no repetir fines de semana seguidos, pero pueden hacerlo como última opción si es necesario.
         * **Alternancia Estricta de Ingenieros:** 🔄 Los ingenieros están bloqueados matemáticamente para repetir FDS hasta que hayan cumplido un turno entre semana o despacho.
         * **Aislamiento de Despacho:** 🌅 Quien hace despacho a las 6 AM no puede tener guardia la semana en curso, ni los fines de semana adyacentes.
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia.
@@ -489,10 +489,11 @@ with tab4:
 
                             es_supervisor = "Supervisor" in ing.get("rol", "")
                             
+                            # REGLA: Supervisores ESTRICTAMENTE PROHIBIDOS en turnos de Despacho o Semana
+                            if b['tipo'] in ['DESPACHO', 'SEMANA'] and es_supervisor: continue
+                            
                             # REGLA DE ALTERNANCIA ESTRICTA SÓLO PARA INGENIEROS
                             if es_fds and ultimo_tipo_guardia[ing["id"]] == "FDS" and not es_supervisor: continue
-                            
-                            if b['tipo'] == 'DESPACHO' and es_supervisor: continue
 
                             ingreso = datetime.strptime(ing.get("fecha_ingreso", "2026-01-01")[:10], "%Y-%m-%d").date()
                             salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
@@ -605,7 +606,7 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Jornadas y Despachos procesados con la flexibilidad de supervisores y equidad actualizada!")
+                        st.success("✅ ¡Jornadas y Despachos procesados! Se respetó el bloqueo estricto de Supervisores en semana.")
                         st.balloons()
                         st.rerun()
                     elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango, incluyendo los manuales, y calcula desde cero)":
@@ -650,13 +651,13 @@ with tab5:
         df_turnos_agrupados = df_asig.groupby(['Nombre', 'Categoria', 'ID_Bloque']).size().reset_index(name='Dias_en_Turno')
         conteo_turnos_reales = df_turnos_agrupados.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
 
-        st.markdown("### ⚖️ 1. Distribución de Carga Operativa")
+        st.markdown("### ⚖️ 1. Distribución de Carga Operativa (Por Turnos)")
         col_g1, col_g2 = st.columns(2)
         
         with col_g1:
             fig_turnos = px.bar(
                 conteo_turnos_reales, x='Nombre', y='Cantidad_Turnos', color='Categoria',
-                title="Conteo por TURNOS (Bloques Completos)",
+                title="Conteo por TURNOS COMPLETOS (Bloques)",
                 color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True,
                 labels={'Cantidad_Turnos': 'Cant. de Turnos (Bloques)'}
             )
@@ -666,7 +667,7 @@ with tab5:
             conteo_dias = df_asig.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Dias')
             fig_dias = px.bar(
                 conteo_dias, x='Nombre', y='Cantidad_Dias', color='Categoria',
-                title="Conteo por DÍAS INDIVIDUALES",
+                title="Visualización Referencial por Días",
                 color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True,
                 labels={'Cantidad_Dias': 'Días Trabajados'}
             )
@@ -702,58 +703,58 @@ with tab5:
             st.info("No hay registros de ausentismos para analizar en este momento.")
 
         st.markdown("---")
-        st.markdown("### 📊 3. Resumen de Turnos (Semana vs. FDS vs. Despacho)")
+        st.markdown("### 📊 3. Resumen de Carga (Turnos Asignados)")
         col_t1, col_t2 = st.columns([1, 2])
 
         with col_t1:
-            df_fds = df_asig[df_asig['Categoria'] == 'FDS']
-            fig_pie_fds = px.pie(df_fds, names='Nombre', title="¿Quién hace más Fines de Semana?", hole=0.4)
+            df_fds_turnos = conteo_turnos_reales[conteo_turnos_reales['Categoria'] == 'FDS']
+            fig_pie_fds = px.pie(df_fds_turnos, names='Nombre', values='Cantidad_Turnos', title="¿Quién hace más Turnos de FDS?", hole=0.4)
             st.plotly_chart(fig_pie_fds, use_container_width=True)
 
         with col_t2:
-            st.caption("Matriz Exacta de Días Asignados")
-            resumen_pivot = conteo_dias.pivot(index='Nombre', columns='Categoria', values='Cantidad_Dias').fillna(0).astype(int)
+            st.caption("Matriz Exacta de Turnos (Bloques Completados)")
+            resumen_pivot = conteo_turnos_reales.pivot(index='Nombre', columns='Categoria', values='Cantidad_Turnos').fillna(0).astype(int)
             for col in ['SEMANA', 'FDS', 'DESPACHO']:
                 if col not in resumen_pivot.columns: resumen_pivot[col] = 0
-            resumen_pivot['TOTAL DÍAS'] = resumen_pivot['SEMANA'] + resumen_pivot['FDS'] + resumen_pivot['DESPACHO']
-            st.dataframe(resumen_pivot.sort_values(by="TOTAL DÍAS", ascending=False), use_container_width=True)
+            resumen_pivot['TOTAL TURNOS'] = resumen_pivot['SEMANA'] + resumen_pivot['FDS'] + resumen_pivot['DESPACHO']
+            st.dataframe(resumen_pivot.sort_values(by="TOTAL TURNOS", ascending=False), use_container_width=True)
             
         st.markdown("---")
-        st.markdown("### 🎭 4. Distribución por Rol Específico")
-        st.caption("Aquí puedes auditar equidad de funciones.")
+        st.markdown("### 🎭 4. Distribución por Rol Específico (Conteo por Turno)")
+        st.caption("Aquí puedes auditar equidad de funciones (Cada bloque de guardia suma 1 función).")
         
         df_asig['Rol_Limpio'] = df_asig['tipo_dia'].apply(lambda x: x.split('(')[-1].replace(')', '').strip() if '(' in x else x)
         df_asig['Rol_Limpio'] = df_asig['Rol_Limpio'].replace({"Apoyo 1": "Apoyo", "Apoyo 2": "Apoyo", "Despacho 6 AM": "Despacho"})
         
-        conteo_roles = df_asig.groupby(['Nombre', 'Rol_Limpio']).size().reset_index(name='Cantidad')
+        roles_por_turno = df_asig.groupby(['Nombre', 'Rol_Limpio', 'ID_Bloque']).size().reset_index(name='Dias_En_Rol')
+        conteo_roles = roles_por_turno.groupby(['Nombre', 'Rol_Limpio']).size().reset_index(name='Cantidad_Turnos')
         
         col_r1, col_r2 = st.columns([2, 1])
         with col_r1:
             fig_roles = px.bar(
-                conteo_roles, x='Nombre', y='Cantidad', color='Rol_Limpio',
-                title="Gráfica de Participación por Rol",
+                conteo_roles, x='Nombre', y='Cantidad_Turnos', color='Rol_Limpio',
+                title="Gráfica de Participación por Rol (Por Turno)",
                 color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100", "Despacho": "#8e24aa"},
-                barmode='group', text_auto=True
+                barmode='group', text_auto=True,
+                labels={'Cantidad_Turnos': 'Turnos Cumplidos'}
             )
             st.plotly_chart(fig_roles, use_container_width=True)
             
         with col_r2:
-            st.caption("Matriz Exacta por Roles")
-            pivot_roles = conteo_roles.pivot(index='Nombre', columns='Rol_Limpio', values='Cantidad').fillna(0).astype(int)
+            st.caption("Matriz Exacta de Funciones (Turnos)")
+            pivot_roles = conteo_roles.pivot(index='Nombre', columns='Rol_Limpio', values='Cantidad_Turnos').fillna(0).astype(int)
             pivot_roles['TOTAL FUNCIONES'] = pivot_roles.sum(axis=1)
             st.dataframe(pivot_roles.sort_values(by="TOTAL FUNCIONES", ascending=False), use_container_width=True)
 
         st.markdown("---")
         st.markdown("### 🌅 5. Control de Despachos (6 AM)")
-        df_despacho = df_asig[df_asig['Categoria'] == 'DESPACHO']
-        if not df_despacho.empty:
-            conteo_despachos = df_despacho.groupby('Nombre').size().reset_index(name='Dias_Despacho')
-            conteo_despachos['Semanas_Asignadas'] = conteo_despachos['Dias_Despacho'] / 5
+        df_despacho_turnos = conteo_turnos_reales[conteo_turnos_reales['Categoria'] == 'DESPACHO']
+        if not df_despacho_turnos.empty:
             fig_desp = px.bar(
-                conteo_despachos, x='Nombre', y='Semanas_Asignadas', 
+                df_despacho_turnos, x='Nombre', y='Cantidad_Turnos', 
                 title="Semanas completas asignadas a Despacho 6 AM", 
                 text_auto=True, color_discrete_sequence=["#ab47bc"],
-                labels={'Semanas_Asignadas': 'Semanas Totales (5 días)'}
+                labels={'Cantidad_Turnos': 'Semanas Asignadas (Turnos)'}
             )
             st.plotly_chart(fig_desp, use_container_width=True)
         else:
@@ -863,7 +864,7 @@ with tab6:
                 
     with col_b2:
         if len(rango_mod) == 2 and turnos_en_rango:
-            st.info(f"Se detectaron **{len(ids_objetivo)}** turnos para {dict_nombres_ing.get(ing_a_reemplazar)} en este rango.")
+            st.info(f"Se detectaron **{len(ids_objetivo)}** días para {dict_nombres_ing.get(ing_a_reemplazar)} en este rango.")
             
             ing_relevo_masivo = st.selectbox("3. Quién toma el relevo de este bloque completo:", lista_ingenieros, format_func=lambda x: f"{x['nombre']} ({x['rol']})", key="ing_rel_masivo")
             
