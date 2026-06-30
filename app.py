@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 5.0 | Nivelación por Bloques y Fix Manuales")
+    st.caption("Versión 5.1 | Balance cruzado SEMANA/FDS y candados de roles")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -345,7 +345,7 @@ with tab4:
         )
 
         if st.button("🚀 Optimizar y Asignar por Jornadas", use_container_width=True):
-            with st.spinner("Construyendo jornadas, despachos y aplicando reglas de alternancia..."):
+            with st.spinner("Construyendo jornadas, despachos y aplicando reglas de alternancia y nivelación cruzada..."):
                 try:
                     # 1. RECUPERAR HISTORIAL Y FILTRAR
                     asigs_historicas = supabase.table("asignaciones").select("*").execute().data
@@ -396,13 +396,15 @@ with tab4:
                             
                         lunes_guia = lunes_proximo
 
-                    # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN (AHORA POR BLOQUES COMPLETOS)
-                    conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros} # Mide cantidad de BLOQUES (Guardias completas)
+                    # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN
+                    conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros} # Mide cantidad TOTAL de BLOQUES
+                    # *NUEVO*: Conteo individual para equilibrar cruces SEMANA vs FDS
+                    conteo_tipo_bloque = {ing["id"]: {"SEMANA": 0, "FDS": 0, "DESPACHO": 0} for ing in lista_ingenieros} 
                     conteo_roles_hist = {ing["id"]: {"Líder": 0, "Apoyo": 0, "Supervisor": 0, "Despacho": 0} for ing in lista_ingenieros}
                     ultimo_tipo_guardia = {ing["id"]: "SEMANA" for ing in lista_ingenieros} 
                     ultimo_turno = {ing["id"]: f_inicio_calc - timedelta(days=50) for ing in lista_ingenieros}
                     
-                    # Agrupar el historial exacto en bloques para calcular equidad real
+                    # Agrupar el historial exacto
                     for ing in lista_ingenieros:
                         turnos_ing = sorted([a for a in asigs_restantes if a["ingeniero_id"] == ing["id"]], key=lambda x: datetime.strptime(x["fecha"], "%Y-%m-%d"))
                         bloques_hist = 0
@@ -414,8 +416,16 @@ with tab4:
                             elif "SUPERVISOR" in r_l: conteo_roles_hist[id_i]["Supervisor"] += 1
                             elif "DESPACHO" in r_l or "DESPACHO" in tipo_str: conteo_roles_hist[id_i]["Despacho"] += 1
                             
-                            if "FDS" in tipo_str: ultimo_tipo_guardia[id_i] = "FDS"
-                            elif "SEMANA" in tipo_str or "DESPACHO" in tipo_str: ultimo_tipo_guardia[id_i] = "SEMANA"
+                            # Actualizar contadores de cruce de nivelación
+                            if "FDS" in tipo_str: 
+                                ultimo_tipo_guardia[id_i] = "FDS"
+                                conteo_tipo_bloque[id_i]["FDS"] += 1
+                            elif "SEMANA" in tipo_str: 
+                                ultimo_tipo_guardia[id_i] = "SEMANA"
+                                conteo_tipo_bloque[id_i]["SEMANA"] += 1
+                            elif "DESPACHO" in tipo_str:
+                                ultimo_tipo_guardia[id_i] = "SEMANA"
+                                conteo_tipo_bloque[id_i]["DESPACHO"] += 1
 
                         if turnos_ing:
                             bloques_hist = 1
@@ -427,20 +437,13 @@ with tab4:
                                 f_actual = datetime.strptime(turnos_ing[i]["fecha"], "%Y-%m-%d").date()
                                 f_prev = datetime.strptime(turnos_ing[i-1]["fecha"], "%Y-%m-%d").date()
                                 
-                                # Si hay un salto mayor a 1 día, es un nuevo bloque (Turno Nuevo)
                                 if (f_actual - f_prev).days > 1:
                                     bloques_hist += 1
                                     registrar_rol_hist(turnos_ing[i].get("tipo_dia", "").upper(), ing["id"])
                                     
-                                ultimo_turno[ing["id"]] = f_actual # Siempre guarda el último día registrado (Incluye Manuales)
+                                ultimo_turno[ing["id"]] = f_actual
                                 
                         conteo_turnos[ing["id"]] = bloques_hist
-                    
-                    dias_potenciales = {}
-                    for ing in lista_ingenieros:
-                        ingreso = datetime.strptime(ing.get("fecha_ingreso", "2026-01-01")[:10], "%Y-%m-%d").date()
-                        salida = datetime.strptime(ing.get("fecha_salida", "2099-12-31")[:10], "%Y-%m-%d").date()
-                        dias_potenciales[ing["id"]] = max(1, sum(1 for d in [f_inicio_calc + timedelta(days=x) for x in range((f_fin_calc - f_inicio_calc).days + 1)] if ingreso <= d <= salida))
                     
                     vacaciones_por_ing = {ing["id"]: set() for ing in lista_ingenieros}
                     for v in lista_vacaciones:
@@ -496,10 +499,11 @@ with tab4:
                         for ing in lista_ingenieros:
                             if ing["id"] in ing_cubiertos: continue 
 
-                            es_supervisor = "Supervisor" in ing.get("rol", "")
+                            # CANDADO ESTRICTO DE SUPERVISORES (Case-Insensitive para evitar saltos del sistema)
+                            es_supervisor = "SUPERVISOR" in ing.get("rol", "").upper()
                             
-                            # REGLA: Supervisores ESTRICTAMENTE PROHIBIDOS en turnos de Despacho o Semana
-                            if b['tipo'] in ['DESPACHO', 'SEMANA'] and es_supervisor: continue
+                            # REGLA: Supervisores ABSOLUTAMENTE PROHIBIDOS en turnos de Despacho o Semana
+                            if b['tipo'] != 'FDS' and es_supervisor: continue
                             
                             # REGLA DE ALTERNANCIA ESTRICTA SÓLO PARA INGENIEROS
                             if es_fds and ultimo_tipo_guardia[ing["id"]] == "FDS" and not es_supervisor: continue
@@ -510,7 +514,6 @@ with tab4:
                             if not all(ingreso <= d <= salida for d in b['fechas']): continue
                             if es_fds and not ing.get("permite_fin_semana", True): continue
                             
-                            # REGLA 20 DÍAS DE DESCANSO (Calculado contra el último turno registrado, incluyendo manuales)
                             if (b['fechas'][0] - ultimo_turno[ing["id"]]).days <= 20: continue
 
                             dias_vac = vacaciones_por_ing[ing["id"]]
@@ -532,13 +535,23 @@ with tab4:
                             if es_supervisor: elegibles_sup.append(ing)
                             else: elegibles_ing.append(ing)
                                 
-                        def seleccionar_mejores(pool, cantidad):
+                        # *NUEVO*: ORDENAMIENTO DE NIVELACIÓN POR TIPO ESPECÍFICO
+                        def seleccionar_mejores(pool, cantidad, tipo_bloque_evaluado):
                             if cantidad == 0: return []
-                            # ORDENAMIENTO PRINCIPAL: Prioriza por Bloques Totales para mantener la carga global equilibrada
+                            
+                            # Prioriza a quien tenga MENOS bloques de ese TIPO exacto (Semana vs FDS),
+                            # y como segundo filtro, a quien tenga menos turnos totales.
                             if es_critico: 
-                                pool.sort(key=lambda x: (not x.get("es_nuevo", False), conteo_turnos[x["id"]], ultimo_tipo_guardia[x["id"]] == "FDS"))
+                                pool.sort(key=lambda x: (
+                                    not x.get("es_nuevo", False), 
+                                    conteo_tipo_bloque[x["id"]].get(tipo_bloque_evaluado, 0),
+                                    conteo_turnos[x["id"]]
+                                ))
                             else: 
-                                pool.sort(key=lambda x: (conteo_turnos[x["id"]], ultimo_tipo_guardia[x["id"]] == "FDS"))
+                                pool.sort(key=lambda x: (
+                                    conteo_tipo_bloque[x["id"]].get(tipo_bloque_evaluado, 0),
+                                    conteo_turnos[x["id"]]
+                                ))
                             return pool[:cantidad]
 
                         elegidos_sup = []
@@ -547,7 +560,7 @@ with tab4:
                         if es_fds:
                             cant_apoyos_necesarios = sum(1 for r in roles_ing_necesarios if "Apoyo" in r)
                             if roles_sup_necesarios:
-                                sups_ordenados_turnos = seleccionar_mejores(elegibles_sup, len(elegibles_sup))
+                                sups_ordenados_turnos = seleccionar_mejores(elegibles_sup, len(elegibles_sup), b['tipo'])
                                 if cant_apoyos_necesarios > 0 and len(sups_ordenados_turnos) >= 2:
                                     top_2_sups = sups_ordenados_turnos[:2]
                                     top_2_sups.sort(key=lambda x: conteo_roles_hist[x["id"]]["Supervisor"])
@@ -559,12 +572,12 @@ with tab4:
                                     conteo_roles_hist[sups_ordenados_turnos[0]["id"]]["Supervisor"] += 1
 
                         cant_ing_necesarios = len([r for r in roles_ing_necesarios if "Líder" in r or "Apoyo" in r or "Despacho" in r])
-                        elegidos_ing_crudos = seleccionar_mejores(elegibles_para_ing, cant_ing_necesarios)
+                        elegidos_ing_crudos = seleccionar_mejores(elegibles_para_ing, cant_ing_necesarios, b['tipo'])
                         
                         asignaciones_finales_bloque = []
                         pool_roles_asignar = roles_ing_necesarios.copy()
                         
-                        candidatos_lider = [x for x in elegidos_ing_crudos if "Supervisor" not in x.get("rol", "")]
+                        candidatos_lider = [x for x in elegidos_ing_crudos if "SUPERVISOR" not in x.get("rol", "").upper()]
                         candidatos_apoyo = [x for x in elegidos_ing_crudos]
                         
                         # Asignar Despacho
@@ -600,14 +613,16 @@ with tab4:
                             
                         # Guardar resultados y actualizar conteos
                         for sup in elegidos_sup:
-                            conteo_turnos[sup["id"]] += 1 # Suma 1 Bloque, NO los días
+                            conteo_turnos[sup["id"]] += 1
+                            conteo_tipo_bloque[sup["id"]]["FDS"] += 1 # Actualiza el contador de equidad cruzada
                             ultimo_turno[sup["id"]] = b['fechas'][-1]
                             ultimo_tipo_guardia[sup["id"]] = "FDS"
                             for dia in b['fechas']:
                                 registros_nuevos.append({"fecha": str(dia), "ingeniero_id": sup["id"], "tipo_dia": f"FDS (Supervisor)"})
 
                         for ing, rol_asignado in asignaciones_finales_bloque:
-                            conteo_turnos[ing["id"]] += 1 # Suma 1 Bloque, NO los días
+                            conteo_turnos[ing["id"]] += 1
+                            conteo_tipo_bloque[ing["id"]][b['tipo']] += 1 # Actualiza el contador de equidad cruzada
                             ultimo_turno[ing["id"]] = b['fechas'][-1] 
                             
                             if b['tipo'] == 'FDS': ultimo_tipo_guardia[ing["id"]] = "FDS"
@@ -618,7 +633,7 @@ with tab4:
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Optimización completada! El algoritmo equilibró las cargas contando Bloques de Turno y respetando el margen de turnos manuales.")
+                        st.success("✅ ¡Optimización completada! El algoritmo equilibró de forma cruzada (Semana/FDS) y aplicó el candado estricto de roles.")
                         st.balloons()
                         st.rerun()
                     elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango, incluyendo los manuales, y calcula desde cero)":
@@ -639,7 +654,6 @@ with tab5:
         df_asig = pd.DataFrame(lista_asignaciones)
         df_asig['Nombre'] = df_asig['ingeniero_id'].map(dict_nombres_ing)
         
-        # Categorización inteligente (Reemplaza "MANUAL" por su día real)
         def categorizar_turno(row):
             tipo = row['tipo_dia'].upper()
             fecha_dt = pd.to_datetime(row['fecha'])
