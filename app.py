@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 5.1 | Balance cruzado SEMANA/FDS y candados de roles")
+    st.caption("Versión 5.2 | Herramientas de Limpieza y Balance cruzado")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -333,6 +333,48 @@ with tab4:
         f_fin_calc = col_a2.date_input("Fecha Fin Semestre", max(datetime.now().date() + timedelta(days=180), FECHA_MIN), min_value=FECHA_MIN)
 
         st.markdown("---")
+        
+        # --- NUEVA SECCIÓN DE LIMPIEZA ---
+        st.subheader("🧹 Herramientas de Limpieza (Rango Seleccionado)")
+        st.markdown("Utiliza estas herramientas para limpiar el calendario antes de asignar turnos manuales o de ejecutar el motor automático.")
+        
+        col_cl1, col_cl2 = st.columns(2)
+        with col_cl1:
+            if st.button("🗑️ Borrar TODO (Dejar en blanco)", use_container_width=True):
+                with st.spinner("Borrando todas las asignaciones..."):
+                    try:
+                        asigs_todas = supabase.table("asignaciones").select("id, fecha").execute().data
+                        ids_a_borrar_todo = [a["id"] for a in asigs_todas if f_inicio_calc <= datetime.strptime(a["fecha"], "%Y-%m-%d").date() <= f_fin_calc]
+                        
+                        if ids_a_borrar_todo:
+                            for i in range(0, len(ids_a_borrar_todo), 100):
+                                supabase.table("asignaciones").delete().in_("id", ids_a_borrar_todo[i:i+100]).execute()
+                            st.success(f"✅ Se borraron {len(ids_a_borrar_todo)} turnos. El calendario quedó completamente en blanco.")
+                            st.rerun()
+                        else:
+                            st.info("No se encontraron turnos para borrar en este rango de fechas.")
+                    except Exception as e:
+                        st.error(f"Error procesando el borrado: {e}")
+
+        with col_cl2:
+            if st.button("🧹 Borrar solo Automáticos (Mantener Manuales)", use_container_width=True):
+                with st.spinner("Borrando turnos generados automáticamente..."):
+                    try:
+                        asigs_todas = supabase.table("asignaciones").select("id, fecha, tipo_dia").execute().data
+                        ids_a_borrar_auto = [a["id"] for a in asigs_todas if f_inicio_calc <= datetime.strptime(a["fecha"], "%Y-%m-%d").date() <= f_fin_calc and "MANUAL" not in a.get("tipo_dia", "").upper()]
+                        
+                        if ids_a_borrar_auto:
+                            for i in range(0, len(ids_a_borrar_auto), 100):
+                                supabase.table("asignaciones").delete().in_("id", ids_a_borrar_auto[i:i+100]).execute()
+                            st.success(f"✅ Se borraron {len(ids_a_borrar_auto)} turnos automáticos. Las asignaciones manuales están intactas.")
+                            st.rerun()
+                        else:
+                            st.info("No se encontraron turnos automáticos para borrar en este rango.")
+                    except Exception as e:
+                        st.error(f"Error procesando el borrado: {e}")
+
+        st.markdown("---")
+        
         st.subheader("Opciones de Ejecución del Algoritmo")
         modo_ejecucion = st.radio(
             "Selecciona qué debe hacer el algoritmo con los turnos que ya existen en ese rango de fechas:", 
@@ -397,8 +439,7 @@ with tab4:
                         lunes_guia = lunes_proximo
 
                     # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN
-                    conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros} # Mide cantidad TOTAL de BLOQUES
-                    # *NUEVO*: Conteo individual para equilibrar cruces SEMANA vs FDS
+                    conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros} 
                     conteo_tipo_bloque = {ing["id"]: {"SEMANA": 0, "FDS": 0, "DESPACHO": 0} for ing in lista_ingenieros} 
                     conteo_roles_hist = {ing["id"]: {"Líder": 0, "Apoyo": 0, "Supervisor": 0, "Despacho": 0} for ing in lista_ingenieros}
                     ultimo_tipo_guardia = {ing["id"]: "SEMANA" for ing in lista_ingenieros} 
@@ -535,12 +576,9 @@ with tab4:
                             if es_supervisor: elegibles_sup.append(ing)
                             else: elegibles_ing.append(ing)
                                 
-                        # *NUEVO*: ORDENAMIENTO DE NIVELACIÓN POR TIPO ESPECÍFICO
                         def seleccionar_mejores(pool, cantidad, tipo_bloque_evaluado):
                             if cantidad == 0: return []
                             
-                            # Prioriza a quien tenga MENOS bloques de ese TIPO exacto (Semana vs FDS),
-                            # y como segundo filtro, a quien tenga menos turnos totales.
                             if es_critico: 
                                 pool.sort(key=lambda x: (
                                     not x.get("es_nuevo", False), 
@@ -580,7 +618,6 @@ with tab4:
                         candidatos_lider = [x for x in elegidos_ing_crudos if "SUPERVISOR" not in x.get("rol", "").upper()]
                         candidatos_apoyo = [x for x in elegidos_ing_crudos]
                         
-                        # Asignar Despacho
                         for r_necesario in list(pool_roles_asignar):
                             if "Despacho" in r_necesario:
                                 if candidatos_apoyo:
@@ -591,7 +628,6 @@ with tab4:
                                     asignaciones_finales_bloque.append((ing_seleccionado, "Despacho"))
                                     pool_roles_asignar.remove(r_necesario)
 
-                        # Asignar Líderes
                         for r_necesario in list(pool_roles_asignar):
                             if "Líder" in r_necesario:
                                 if candidatos_lider:
@@ -602,7 +638,6 @@ with tab4:
                                     asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
                                     pool_roles_asignar.remove(r_necesario)
 
-                        # Asignar Apoyos
                         for r_necesario in list(pool_roles_asignar):
                             if "Apoyo" in r_necesario:
                                 if candidatos_apoyo:
@@ -611,10 +646,9 @@ with tab4:
                                     conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
                                     asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
                             
-                        # Guardar resultados y actualizar conteos
                         for sup in elegidos_sup:
                             conteo_turnos[sup["id"]] += 1
-                            conteo_tipo_bloque[sup["id"]]["FDS"] += 1 # Actualiza el contador de equidad cruzada
+                            conteo_tipo_bloque[sup["id"]]["FDS"] += 1
                             ultimo_turno[sup["id"]] = b['fechas'][-1]
                             ultimo_tipo_guardia[sup["id"]] = "FDS"
                             for dia in b['fechas']:
@@ -622,7 +656,7 @@ with tab4:
 
                         for ing, rol_asignado in asignaciones_finales_bloque:
                             conteo_turnos[ing["id"]] += 1
-                            conteo_tipo_bloque[ing["id"]][b['tipo']] += 1 # Actualiza el contador de equidad cruzada
+                            conteo_tipo_bloque[ing["id"]][b['tipo']] += 1
                             ultimo_turno[ing["id"]] = b['fechas'][-1] 
                             
                             if b['tipo'] == 'FDS': ultimo_tipo_guardia[ing["id"]] = "FDS"
