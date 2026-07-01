@@ -43,7 +43,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 5.2 | Herramientas de Limpieza y Balance cruzado")
+    st.caption("Versión 5.3 | Corrección de Festivos y Lunes Operativos")
 
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y ESTÉTICA
@@ -58,6 +58,7 @@ def obtener_estilo_motivo(motivo):
         "Incapacidad Médica": ("🤒", "#ffebee", "#c62828"),
         "Permiso Empresa": ("🏢", "#f3e5f5", "#6a1b9a"),
         "Licencia": ("📜", "#e8f5e9", "#2e7d32"),
+        "Festivo": ("🎊", "#e8eaf6", "#283593"),
         "Otro": ("⚠️", "#fff8e1", "#ff8f00")
     }
     return estilos.get(motivo, ("⚠️", "#fff8e1", "#ff8f00"))
@@ -103,9 +104,9 @@ with tab1:
     with st.expander("📖 **¿Cómo se asignan los turnos? (Reglas de Transparencia)**"):
         st.markdown("""
         El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
-        * **Jornadas Bloqueadas:** Se manejan bloques de *Despacho (Lun-Vie)*, *Semana (Lun-Jue)* o *Fin de Semana (Vie-Dom)*.
+        * **Jornadas Bloqueadas:** Se manejan bloques de *Despacho (Lun-Vie)*, *Semana (Lun-Jue)* o *Fin de Semana (Vie-Dom)*. En caso de Lunes Festivo, el fin de semana se extiende hasta el Lunes.
         * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor). Despacho toma 1 Ingeniero exclusivo.
-        * **Restricción Supervisores:** Operan SÓLO fines de semana. Jamás entre semana. Tratan de no repetir fines de semana seguidos, pero pueden hacerlo como última opción si es necesario.
+        * **Restricción Supervisores:** Operan SÓLO fines de semana. Jamás entre semana.
         * **Alternancia Estricta de Ingenieros:** 🔄 Los ingenieros están bloqueados matemáticamente para repetir FDS hasta que hayan cumplido un turno entre semana o despacho.
         * **Aislamiento de Despacho:** 🌅 Quien hace despacho a las 6 AM no puede tener guardia la semana en curso, ni los fines de semana adyacentes.
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia (Incluyendo turnos manuales).
@@ -299,7 +300,7 @@ with tab3:
         with col_v1:
             with st.form("form_vac"):
                 ing_ausente = st.selectbox("Profesional:", lista_ingenieros, format_func=lambda x: x["nombre"])
-                motivo_ausentismo = st.selectbox("Tipo de Ausentismo:", ["Vacaciones", "Incapacidad Médica", "Permiso Empresa", "Licencia", "Otro"])
+                motivo_ausentismo = st.selectbox("Tipo de Ausentismo:", ["Vacaciones", "Incapacidad Médica", "Permiso Empresa", "Licencia", "Festivo", "Otro"])
                 fechas = st.date_input("Rango de Fechas:", [], min_value=FECHA_MIN)
                 
                 if st.form_submit_button("📅 Bloquear Fechas") and len(fechas) == 2:
@@ -334,7 +335,6 @@ with tab4:
 
         st.markdown("---")
         
-        # --- NUEVA SECCIÓN DE LIMPIEZA ---
         st.subheader("🧹 Herramientas de Limpieza (Rango Seleccionado)")
         st.markdown("Utiliza estas herramientas para limpiar el calendario antes de asignar turnos manuales o de ejecutar el motor automático.")
         
@@ -690,12 +690,16 @@ with tab5:
         
         def categorizar_turno(row):
             tipo = row['tipo_dia'].upper()
-            fecha_dt = pd.to_datetime(row['fecha'])
+            fecha_str = row['fecha']
+            fecha_dt = pd.to_datetime(fecha_str)
             if "DESPACHO" in tipo: return "DESPACHO"
             if "FDS" in tipo: return "FDS"
             if "SEMANA" in tipo: return "SEMANA"
             if "MANUAL" in tipo:
+                # Viernes(4), Sábado(5), Domingo(6) siempre son FDS
                 if fecha_dt.weekday() >= 4: return "FDS"
+                # Si es Lunes(0) Y la fecha está en la lista de festivos, cuenta para el bloque FDS
+                elif fecha_dt.weekday() == 0 and fecha_str in festivos_colombia_lista: return "FDS"
                 else: return "SEMANA"
             return "SEMANA"
             
@@ -752,7 +756,7 @@ with tab5:
                 fig_vac_bar = px.bar(
                     df_vac_stats, x='Nombre', y='Dias_Ausente', color='Motivo',
                     title="Días Totales de Ausencia por Profesional", text_auto=True,
-                    color_discrete_map={"Vacaciones": "#00bcd4", "Incapacidad Médica": "#f44336", "Permiso Empresa": "#9c27b0", "Licencia": "#4caf50", "Otro": "#ff9800"},
+                    color_discrete_map={"Vacaciones": "#00bcd4", "Incapacidad Médica": "#f44336", "Permiso Empresa": "#9c27b0", "Licencia": "#4caf50", "Festivo": "#283593", "Otro": "#ff9800"},
                     labels={'Dias_Ausente': 'Días Fuera'}
                 )
                 st.plotly_chart(fig_vac_bar, use_container_width=True)
