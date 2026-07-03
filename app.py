@@ -281,16 +281,44 @@ with tab7:
                             st.error(f"Error. ¿Creaste la tabla de propuestas? Detalle: {e}")
                     else:
                         st.error("⚠️ Debes seleccionar una fecha de inicio y una de fin.")
-                        
+            
             st.markdown("---")
+            
+            # 🗑️ NUEVA SECCIÓN: RETIRAR PROPUESTA
+            st.subheader("🗑️ Anular Propuesta")
+            st.caption("Si cambiaste de opinión, puedes cancelar tu solicitud mientras siga en estado 'Pendiente'.")
+            
+            propuestas_retirables = [p for p in lista_propuestas if p.get("estado") == "Pendiente"]
+            
+            if propuestas_retirables:
+                prop_a_retirar = st.selectbox(
+                    "Selecciona la propuesta a cancelar:", 
+                    propuestas_retirables, 
+                    format_func=lambda x: f"{dict_nombres_ing.get(x['ingeniero_id'])} - {x['motivo']} ({x['fecha_inicio']} a {x['fecha_fin']})",
+                    key="sb_retirar"
+                )
+                
+                if st.button("🗑️ Retirar mi propuesta", use_container_width=True):
+                    try:
+                        supabase.table("propuestas_ausentismos").delete().eq("id", prop_a_retirar["id"]).execute()
+                        st.success("✅ Propuesta cancelada exitosamente.")
+                        st.rerun()
+                    except Exception as e: 
+                        st.error(f"Error: {e}")
+            else:
+                st.info("No hay propuestas pendientes que se puedan retirar.")
+
+            st.markdown("---")
+            
             st.subheader("🔐 Panel del Jefe (Aprobaciones)")
             propuestas_pendientes = [p for p in lista_propuestas if p.get("estado") == "Pendiente"]
             
             if propuestas_pendientes:
                 prop_seleccionada = st.selectbox(
-                    "Selecciona una propuesta pendiente:", 
+                    "Selecciona una propuesta pendiente para evaluar:", 
                     propuestas_pendientes, 
-                    format_func=lambda x: f"{dict_nombres_ing.get(x['ingeniero_id'])} - {x['motivo']} ({x['fecha_inicio']} a {x['fecha_fin']})"
+                    format_func=lambda x: f"{dict_nombres_ing.get(x['ingeniero_id'])} - {x['motivo']} ({x['fecha_inicio']} a {x['fecha_fin']})",
+                    key="sb_jefe"
                 )
                 
                 col_btn1, col_btn2 = st.columns(2)
@@ -329,7 +357,7 @@ with tab7:
             with col_m2: mes_p = st.selectbox("Mes (Propuestas):", list(range(1, 13)), format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x - 1], key="mes_p")
             
             st.markdown("---")
-            # 🔘 Nuevo selector de vista
+            # 🔘 Selector de vista
             tipo_vista_p = st.radio("Formato de visualización:", ["📅 Vista Calendario", "🗂️ Vista Matriz (Por Persona)"], horizontal=True, key="vista_p")
             
             primer_dia_p = datetime(año_p, mes_p, 1)
