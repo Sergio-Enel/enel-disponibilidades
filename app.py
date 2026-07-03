@@ -328,34 +328,76 @@ with tab7:
             with col_m1: año_p = st.selectbox("Año (Propuestas):", [2026, 2027, 2028, 2029, 2030], index=0, key="año_p")
             with col_m2: mes_p = st.selectbox("Mes (Propuestas):", list(range(1, 13)), format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x - 1], key="mes_p")
             
+            st.markdown("---")
+            # 🔘 Nuevo selector de vista
+            tipo_vista_p = st.radio("Formato de visualización:", ["📅 Vista Calendario", "🗂️ Vista Matriz (Por Persona)"], horizontal=True, key="vista_p")
+            
             primer_dia_p = datetime(año_p, mes_p, 1)
             ultimo_dia_p = (datetime(año_p + 1, 1, 1) - timedelta(days=1)) if mes_p == 12 else (datetime(año_p, mes_p + 1, 1) - timedelta(days=1))
             rango_dias_p = [primer_dia_p + timedelta(days=x) for x in range((ultimo_dia_p - primer_dia_p).days + 1)]
             
-            cols_dias_p = [d.strftime("%Y-%m-%d") for d in rango_dias_p]
-            nombres_cols_p = [d.strftime("%d-%b") for d in rango_dias_p]
+            if "Matriz" in tipo_vista_p:
+                cols_dias_p = [d.strftime("%Y-%m-%d") for d in rango_dias_p]
+                nombres_cols_p = [d.strftime("%d-%b") for d in rango_dias_p]
 
-            matriz_prop_df = pd.DataFrame(index=[ing["nombre"] for ing in lista_ingenieros], columns=cols_dias_p)
-            matriz_prop_df = matriz_prop_df.fillna("—")
-            
-            for p in lista_propuestas:
-                nom_ing = dict_nombres_ing.get(p["ingeniero_id"])
-                if nom_ing in matriz_prop_df.index:
-                    p_ini = datetime.strptime(p["fecha_inicio"], "%Y-%m-%d")
-                    p_fin = datetime.strptime(p["fecha_fin"], "%Y-%m-%d")
-                    estado = p.get("estado", "Pendiente")
-                    dia_aux = p_ini
-                    
-                    while dia_aux <= p_fin:
-                        str_dia = dia_aux.strftime("%Y-%m-%d")
-                        if str_dia in matriz_prop_df.columns:
-                            emo, _, _ = obtener_estilo_motivo(p.get("motivo", "Otro"), estado)
-                            # Se añade el estado a la celda
-                            matriz_prop_df.at[nom_ing, str_dia] = f"{emo} {estado[:4]}."
-                        dia_aux += timedelta(days=1)
+                matriz_prop_df = pd.DataFrame(index=[ing["nombre"] for ing in lista_ingenieros], columns=cols_dias_p)
+                matriz_prop_df = matriz_prop_df.fillna("—")
+                
+                for p in lista_propuestas:
+                    nom_ing = dict_nombres_ing.get(p["ingeniero_id"])
+                    if nom_ing in matriz_prop_df.index:
+                        p_ini = datetime.strptime(p["fecha_inicio"], "%Y-%m-%d")
+                        p_fin = datetime.strptime(p["fecha_fin"], "%Y-%m-%d")
+                        estado = p.get("estado", "Pendiente")
+                        dia_aux = p_ini
+                        
+                        while dia_aux <= p_fin:
+                            str_dia = dia_aux.strftime("%Y-%m-%d")
+                            if str_dia in matriz_prop_df.columns:
+                                emo, _, _ = obtener_estilo_motivo(p.get("motivo", "Otro"), estado)
+                                matriz_prop_df.at[nom_ing, str_dia] = f"{emo} {estado[:4]}."
+                            dia_aux += timedelta(days=1)
 
-            matriz_prop_df.columns = nombres_cols_p
-            st.dataframe(matriz_prop_df, use_container_width=True)
+                matriz_prop_df.columns = nombres_cols_p
+                st.dataframe(matriz_prop_df, use_container_width=True)
+                
+            else:
+                # 📅 Lógica para renderizar la Vista de Calendario
+                cal_p = calendar.Calendar(firstweekday=0)
+                semanas_p = cal_p.monthdatescalendar(año_p, mes_p)
+                cols_dias_p = st.columns(7)
+                for i, nombre_dia in enumerate(["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]):
+                    cols_dias_p[i].markdown(f"<div style='text-align: center; font-weight: bold; background-color: #f0f2f6; padding: 5px; border-radius: 5px;'>{nombre_dia}</div>", unsafe_allow_html=True)
+                
+                st.write("")
+                for semana in semanas_p:
+                    cols_semana = st.columns(7)
+                    for i, dia in enumerate(semana):
+                        with cols_semana[i]:
+                            if dia.month == mes_p:
+                                str_dia = dia.strftime("%Y-%m-%d")
+                                
+                                if str_dia in festivos_colombia_lista:
+                                    st.markdown(f"**{dia.day}** 🎊")
+                                else:
+                                    st.markdown(f"**{dia.day}**")
+                                    
+                                propuestas_hoy = [
+                                    p for p in lista_propuestas 
+                                    if datetime.strptime(p["fecha_inicio"], "%Y-%m-%d").date() <= dia <= datetime.strptime(p["fecha_fin"], "%Y-%m-%d").date()
+                                ]
+                                
+                                for p in propuestas_hoy:
+                                    motivo = p.get('motivo', 'Otro')
+                                    estado = p.get('estado', 'Pendiente')
+                                    emo, bg_col, txt_col = obtener_estilo_motivo(motivo, estado)
+                                    txt_estado = estado[:4] + "."
+                                    st.markdown(f"<div style='background-color: {bg_col}; color: {txt_col}; padding: 4px; border-radius: 4px; font-size: 11px; margin-bottom: 2px;' title='{motivo} - {estado}'>{emo} {dict_nombres_ing.get(p['ingeniero_id'], '')} ({txt_estado})</div>", unsafe_allow_html=True)
+                                
+                                st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"<span style='color: #ccc;'>{dia.day}</span>", unsafe_allow_html=True)
+                    st.divider()
             
             st.markdown("<small><b>Leyenda:</b> ⏳ Pendiente | 🌴 Aprobado | ❌ Rechazado</small>", unsafe_allow_html=True)
 
