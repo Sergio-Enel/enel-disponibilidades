@@ -115,7 +115,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 6.2 | Aislamiento Algorítmico de Despachos")
+    st.caption("Versión 6.3 | Adyacencia Unidireccional en Despachos")
 
 # ==========================================
 # ⚡ INTERFAZ PRINCIPAL
@@ -149,6 +149,7 @@ with tab1:
         * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor). Despacho toma 1 Ingeniero exclusivo.
         * **Restricción de Líder Consecutivo:** 🚫 Ningún profesional puede ejercer el rol de Líder en dos turnos seguidos.
         * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno regular si no han pasado al menos **20 días** desde su última guardia. (El rol de Despacho se evalúa de manera aislada).
+        * **Adyacencia de Despacho:** 🛡️ Un profesional no puede recibir un turno de Despacho si tiene una guardia (Semana/FDS) en la semana o fin de semana inmediatamente anterior o posterior.
         * **Personal Exento:** Aquellos marcados como exentos en la configuración de equipo no participan del motor automático.
         """)
     st.markdown("---")
@@ -789,13 +790,20 @@ with tab4:
                             if any(f_b in fechas_todas_ing for f_b in b['fechas']):
                                 continue # Nadie puede tomar dos turnos distintos físicamente el mismo día
                             
-                            # 🚨 SEPARACIÓN: Cooldown de 20 días aislado (Despacho vs Despacho / Guardia vs Guardia)
+                            # 🚨 SEPARACIÓN: Cooldown de 20 días aislado y Adyacencia
                             if b['tipo'] == 'DESPACHO':
+                                # 1. Cooldown Despacho vs Despacho (20 días)
                                 fechas_evaluar_cooldown = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" in a.get("tipo_dia", "").upper()]
                                 fechas_evaluar_cooldown.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" in r.get("tipo_dia", "").upper()])
+                                
+                                # 2. Adyacencia: Disponibilidades afectan Despachos (Radio de 7 días)
+                                fechas_guardia_adyacente = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" not in a.get("tipo_dia", "").upper()]
+                                fechas_guardia_adyacente.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" not in r.get("tipo_dia", "").upper()])
                             else:
+                                # Guardias (Semana/FDS): Cooldown 20 días vs otras guardias. Despachos no influyen.
                                 fechas_evaluar_cooldown = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" not in a.get("tipo_dia", "").upper()]
                                 fechas_evaluar_cooldown.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" not in r.get("tipo_dia", "").upper()])
+                                fechas_guardia_adyacente = [] # No aplica para guardias
                                 
                             cooldown_valido = True
                             for f_b in b['fechas']:
@@ -806,6 +814,18 @@ with tab4:
                                 if not cooldown_valido: break
                             
                             if not cooldown_valido: continue
+
+                            # 🚨 Validación de Adyacencia (aplica solo para evaluación de Despachos)
+                            adyacencia_invalida = False
+                            if b['tipo'] == 'DESPACHO':
+                                for f_b in b['fechas']:
+                                    for f_g in fechas_guardia_adyacente:
+                                        if abs((f_b - f_g).days) <= 7:
+                                            adyacencia_invalida = True
+                                            break
+                                    if adyacencia_invalida: break
+                            
+                            if adyacencia_invalida: continue
 
                             dias_vac = vacaciones_por_ing[ing["id"]]
                             fechas_bloque = b['fechas']
