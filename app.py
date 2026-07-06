@@ -145,12 +145,15 @@ with tab1:
     with st.expander("📖 **¿Cómo se asignan los turnos? (Reglas de Transparencia)**"):
         st.markdown("""
         El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
-        * **Jornadas Bloqueadas:** Se manejan bloques de *Despacho (Lun-Vie)*, *Semana (Lun-Jue)* o *Fin de Semana (Vie-Dom)*. En caso de Lunes Festivo, el fin de semana se extiende hasta el Lunes.
-        * **Roles por Jornada:** En Semana operan 2 ingenieros (1 Líder y 1 Apoyo). En FDS operan 4 personas (1 Líder, 2 Apoyos y 1 Supervisor). Despacho toma 1 Ingeniero exclusivo.
+        * **Jornadas Bloqueadas:** Se manejan bloques de *Despacho (Lun-Vie)*, *Semana (Lun-Jue)* o *Fin de Semana (Vie-Dom)*.
+        * **Roles por Jornada:** Los equipos se configuran según la carga operativa (Líder/Apoyo/Supervisor).
+        * **No Repetición de FDS:** 🔄 Ningún profesional (salvo Supervisores por necesidad operativa) puede ser asignado a un Fin de Semana si su última guardia fue también un Fin de Semana.
         * **Restricción de Líder Consecutivo:** 🚫 Ningún profesional puede ejercer el rol de Líder en dos turnos seguidos.
-        * **Descanso (Cooldown de 3 semanas):** ⏳ Nadie recibe un turno regular si no han pasado al menos **20 días** desde su última guardia. (El rol de Despacho se evalúa de manera aislada).
-        * **Adyacencia de Despacho:** 🛡️ Un profesional no puede recibir un turno de Despacho si tiene una guardia (Semana/FDS) en la semana o fin de semana inmediatamente anterior o posterior.
-        * **Personal Exento:** Aquellos marcados como exentos en la configuración de equipo no participan del motor automático.
+        * **Descanso (Cooldown):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia (el Despacho se evalúa de manera aislada).
+        * **Adyacencia de Despacho:** 🛡️ Un profesional no puede recibir un turno de Despacho si tiene una guardia (Semana/FDS) en un radio de 7 días.
+        * **Inducción (Prioridad Nuevo):** 🎓 El personal "Nuevo" es priorizado inicialmente en roles de Apoyo para garantizar un aprendizaje seguro.
+        * **Gestión de Conflictos:** 🛑 El sistema excluye automáticamente a cualquier profesional con vacaciones aprobadas o solapamiento físico en las fechas del turno.
+        * **Equidad en Emergencias:** ⚠️ Ante ausentismos imprevistos, se prioriza al profesional que registre mayor tiempo transcurrido desde su última participación operativa.
         """)
     st.markdown("---")
 
