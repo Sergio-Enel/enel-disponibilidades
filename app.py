@@ -194,7 +194,11 @@ with st.sidebar:
                 c_bot = st.text_input("Correo Bot (Outlook que envía):", value=config_actual.get("correo_bot", ""))
                 p_bot = st.text_input("Contraseña App (Outlook):", value=config_actual.get("password_bot", ""), type="password")
                 
-                if st.form_submit_button("💾 Guardar Correos"):
+                col_btn1, col_btn2 = st.columns(2)
+                btn_guardar = col_btn1.form_submit_button("💾 Guardar Todo")
+                btn_borrar_jefe = col_btn2.form_submit_button("🗑️ Quitar Jefe")
+                
+                if btn_guardar:
                     datos = {"correo_jefe": c_jefe, "correo_bot": c_bot, "password_bot": p_bot}
                     if config_actual.get("id"):
                         supabase.table("config_admin").update(datos).eq("id", config_actual["id"]).execute()
@@ -202,6 +206,12 @@ with st.sidebar:
                         supabase.table("config_admin").insert(datos).execute()
                     st.success("Configuración de correos guardada.")
                     st.rerun()
+                    
+                if btn_borrar_jefe:
+                    if config_actual.get("id"):
+                        supabase.table("config_admin").update({"correo_jefe": ""}).eq("id", config_actual["id"]).execute()
+                        st.success("Correo del jefe eliminado.")
+                        st.rerun()
 
         with st.expander("🔐 Gestión de Contraseñas", expanded=False):
             st.caption("Administra las claves de acceso al sistema.")
@@ -265,7 +275,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 11.0 | Fix Navegación & Outlook")
+    st.caption("Versión 11.1 | Fix Correos & Perfiles Individuales")
 
 # ==========================================
 # ⚡ INTERFAZ PRINCIPAL (NAVEGADOR HORIZONTAL)
@@ -422,6 +432,16 @@ if "Dashboard" in pestana_actual:
             pivot_roles_cat.columns = [f"{col[1]} en {col[0]}" for col in pivot_roles_cat.columns]
             pivot_roles_cat['Total Consolidado'] = pivot_roles_cat.sum(axis=1)
             st.dataframe(pivot_roles_cat.sort_values(by="Total Consolidado", ascending=False), use_container_width=True)
+
+        st.markdown("#### 🧑‍💻 Análisis Individual por Profesional")
+        ing_analisis = st.selectbox("Selecciona un profesional para ver su distribución exacta:", lista_ingenieros, format_func=lambda x: x["nombre"], key="sel_indiv")
+        if ing_analisis:
+            df_indiv = roles_por_turno[roles_por_turno['Nombre'] == ing_analisis['nombre']]
+            if not df_indiv.empty:
+                fig_indiv = px.pie(df_indiv, names='Rol_Limpio', values='Cantidad_Turnos', title=f"Distribución de Roles - {ing_analisis['nombre']}", hole=0.4, color='Rol_Limpio', color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100", "Despacho": "#8e24aa"})
+                st.plotly_chart(fig_indiv, use_container_width=True)
+            else:
+                st.info("No hay turnos registrados para este profesional.")
 
         st.markdown("---")
 
@@ -826,6 +846,23 @@ elif "Gestión de Equipo" in pestana_actual and st.session_state.role == "admin"
             st.dataframe(df_show, use_container_width=True, hide_index=True)
             
             st.markdown("---")
+            
+            # --- NUEVA SECCIÓN: ACTUALIZAR CORREO ---
+            st.subheader("✏️ Actualizar Correo de Profesional")
+            st.caption("Modifica el correo de alguien que ya está registrado sin tener que eliminarlo.")
+            ing_a_editar = st.selectbox("Selecciona al profesional:", lista_ingenieros, format_func=lambda x: f"{x['id']} - {x['nombre']}", key="edit_correo")
+            nuevo_correo = st.text_input("Nuevo Correo:", value=ing_a_editar.get("correo", "") if ing_a_editar else "")
+            
+            if st.button("🔄 Actualizar Correo"):
+                try:
+                    supabase.table("ingenieros").update({"correo": nuevo_correo}).eq("id", ing_a_editar["id"]).execute()
+                    st.success(f"✅ Correo actualizado para {ing_a_editar['nombre']}.")
+                    st.rerun()
+                except Exception as e: st.error(f"Error al actualizar: {e}")
+                
+            st.markdown("---")
+            # ---------------------------------------
+
             col_b1, col_b2 = st.columns(2)
             
             with col_b1:
