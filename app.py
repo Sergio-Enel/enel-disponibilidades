@@ -35,6 +35,17 @@ def enviar_correo(destinatario, asunto, mensaje_html):
     if not destinatario: return False
     config = obtener_config_correo()
     if not config or not config.get("correo_bot") or not config.get("password_bot"):
+        print("Faltan credenciales del bot para enviar correo.")
+        return False
+        
+    try:
+        # ... (todo tu código de SMTP igual) ...
+        server.sendmail(remitente, destinatario, msg.as_string())
+        server.quit()
+        print(f"✅ Correo enviado con éxito a {destinatario}") # Esto aparecerá en los logs de Streamlit
+        return True
+    except Exception as e:
+        print(f"❌ Error al enviar correo: {e}")
         return False
         
     remitente = config["correo_bot"]
