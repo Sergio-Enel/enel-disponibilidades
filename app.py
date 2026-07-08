@@ -78,30 +78,32 @@ lista_contrasenas = obtener_contrasenas()
 dict_nombres_ing = {ing["id"]: ing["nombre"] for ing in lista_ingenieros}
 
 # ==========================================
-# 🔐 SISTEMA DE AUTENTICACIÓN Y ROLES
+# 🔐 SISTEMA DE AUTENTICACIÓN Y ROLES (MEJORADO Y PROFESIONAL)
 # ==========================================
 if "role" not in st.session_state:
     st.session_state.role = None
 
 if st.session_state.role is None:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_logo, col_titulo = st.columns([1, 4])
+    col_izq, col_centro, col_der = st.columns([1, 2, 1])
     
-    with col_titulo:
-        st.title("⚡ Sistema de Asignación de Disponibilidades")
-        st.markdown("Plataforma de Control Operativo y Equidad")
-    
-    st.markdown("<hr>", unsafe_allow_html=True)
-    
-    col_log1, col_log2, col_log3 = st.columns([1, 2, 1])
-    with col_log2:
-        st.info("ℹ️ **Empleados:** Acceso a consulta de turnos, envío de propuestas y métricas.")
-        tipo_acceso = st.radio("Perfil de Acceso:", ["👨‍💻 Empleado (Consulta y Solicitudes)", "🛡️ Administrador / Jefe"])
+    with col_centro:
+        # 1. ENCABEZADO CORPORATIVO
+        st.markdown("""
+        <div style='text-align: center; padding: 25px; background-color: #ffffff; border-radius: 12px; border-bottom: 5px solid #ff9800; box-shadow: 0px 8px 20px rgba(0,0,0,0.08); margin-bottom: 25px;'>
+            <h1 style='color: #1e3c72; margin-bottom: 5px; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;'>⚡ DISPONIBILIDADES</h1>
+            <h4 style='color: #7f8c8d; margin-top: 0px; font-weight: 400;'>Plataforma de Control Operativo y Equidad</h4>
+        </div>
+        """, unsafe_allow_html=True)
         
+        # 2. SELECTOR DE PERFIL
+        tipo_acceso = st.selectbox("👤 Selecciona tu perfil de acceso:", ["👨‍💻 Empleado (Consulta y Solicitudes)", "🛡️ Administrador / Jefe"])
+        st.markdown("<hr style='margin: 15px 0px;'>", unsafe_allow_html=True)
+        
+        # 3. LÓGICA DE INGRESO
         if "Administrador" in tipo_acceso:
-            pwd = st.text_input("Contraseña de acceso:", type="password")
-            if st.button("Ingresar como Administrador", use_container_width=True):
-                # Validar contra base de datos + clave maestra
+            pwd = st.text_input("🔑 Contraseña de acceso seguro:", type="password")
+            if st.button("🚀 Ingresar al Sistema", use_container_width=True, type="primary"):
                 claves_validas = [p['password'] for p in lista_contrasenas] if lista_contrasenas else []
                 claves_validas.append("AdminEnel2026*") # Clave maestra de respaldo
                 
@@ -109,22 +111,29 @@ if st.session_state.role is None:
                     st.session_state.role = "admin"
                     st.rerun()
                 else:
-                    st.error("❌ Contraseña incorrecta.")
+                    st.error("❌ Contraseña incorrecta. Intenta nuevamente.")
         else:
-            if st.button("Ingresar como Empleado", use_container_width=True):
+            st.info("💡 **Modo Empleado:** Acceso a consulta del calendario, envío de propuestas de ausentismo y auditoría de equidad.")
+            if st.button("🚀 Ingresar como Empleado", use_container_width=True, type="primary"):
                 st.session_state.role = "empleado"
                 st.rerun()
         
-        st.markdown("<br>", unsafe_allow_html=True)
-        # 🔥 NUEVOS CRÉDITOS EN LA ZONA DE SELECCIÓN DE PERFIL
+        # 4. CRÉDITOS Y CONTACTO (TARJETA PROFESIONAL)
         st.markdown("""
-        <div style='text-align: center; color: #666; font-size: 14px; margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd;'>
-            <i>Herramienta desarrollada para <b>Enel Colombia</b></i><br>
-            Diseño e implementación por <b>Sergio Cutiva</b>
+        <div style='text-align: center; margin-top: 35px; padding: 25px; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);'>
+            <p style='margin: 0; font-size: 13px; opacity: 0.8; text-transform: uppercase; letter-spacing: 1px;'>Diseñado y Desarrollado por</p>
+            <h2 style='margin: 8px 0; color: #ffffff; font-weight: 600;'>👨‍💻 Sergio Cutiva</h2>
+            <div style='width: 60px; height: 3px; background-color: #ff9800; margin: 12px auto; border-radius: 2px;'></div>
+            <p style='margin: 0; font-size: 14px; line-height: 1.6;'>
+                <span style='opacity: 0.9;'>📧 sergio.cutiva@enel.com</span><br>
+                <span style='opacity: 0.9;'>📧 sergiocutivam@gmail.com</span>
+            </p>
+            <p style='margin: 15px 0 0 0; font-size: 12px; opacity: 0.7; font-style: italic;'>Automatización y Mejora de Procesos | Enel Colombia</p>
         </div>
         """, unsafe_allow_html=True)
         
-    st.stop()
+    st.stop() 
+
 # ==========================================
 # 👨‍💻 BARRA LATERAL (CONFIGURACIÓN)
 # ==========================================
@@ -205,20 +214,21 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 8.0 | Dashboard Pro & RBAC")
+    st.caption("Versión 9.0 | Dashboard Pro & RBAC")
 
 # ==========================================
-# ⚡ INTERFAZ PRINCIPAL
+# ⚡ INTERFAZ PRINCIPAL Y ORDEN DE PESTAÑAS (CORREGIDO)
 # ==========================================
 FECHA_MIN = date(2026, 1, 1)
 
 st.title("⚡ Panel Operativo de Disponibilidades")
 st.markdown("---")
 
+# NOTA: EL ORDEN EN st.tabs DEFINE QUÉ PESTAÑA APARECE PRIMERO
 if st.session_state.role == "admin":
-    t_dash, t_cal, t_por, t_equi, t_rrhh, t_mot, t_man = st.tabs([
-        "📊 Dashboard Ejecutivo",
+    t_cal, t_dash, t_por, t_equi, t_rrhh, t_mot, t_man = st.tabs([
         "📅 Calendario Operativo", 
+        "📊 Dashboard Ejecutivo",
         "📩 Portal de Ausentismos", 
         "👥 Gestión de Equipo", 
         "🌴 Panel RRHH", 
@@ -226,14 +236,14 @@ if st.session_state.role == "admin":
         "🔄 Asignaciones Manuales"
     ])
 else:
-    t_dash, t_cal, t_por = st.tabs([
-        "📊 Dashboard y Auditoría",
+    t_cal, t_dash, t_por = st.tabs([
         "📅 Calendario Operativo", 
+        "📊 Dashboard y Auditoría",
         "📩 Portal de Solicitudes"
     ])
 
 # ==========================================
-# 📊 PESTAÑA 1: DASHBOARD Y AUDITORÍA (EXPANDIDO)
+# 📊 PESTAÑA DASHBOARD Y AUDITORÍA (CON TABLAS RESTAURADAS)
 # ==========================================
 with t_dash:
     st.header("📈 Panel de Análisis Operativo")
@@ -316,7 +326,7 @@ with t_dash:
 
         st.markdown("---")
         
-        # 📈 4. LÍNEA DE TIEMPO / EVOLUCIÓN (NUEVO)
+        # 📈 4. LÍNEA DE TIEMPO / EVOLUCIÓN
         st.markdown("### 📈 Evolución de Carga por Mes")
         tendencia_mes = df_asig.groupby(['Mes', 'Categoria']).size().reset_index(name='Turnos')
         fig_linea = px.line(tendencia_mes, x='Mes', y='Turnos', color='Categoria', markers=True, title="Histórico de Ocupación por Mes", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"})
@@ -367,8 +377,31 @@ with t_dash:
             pivot_roles_cat['Total Consolidado'] = pivot_roles_cat.sum(axis=1)
             st.dataframe(pivot_roles_cat.sort_values(by="Total Consolidado", ascending=False), use_container_width=True)
 
+        st.markdown("---")
+
+        # 🗂️ 7. TABLAS DE DATOS CRUDOS RESTAURADAS
+        st.markdown("### 🗂️ Explorador de Datos Crudos")
+        st.caption("Tablas detalladas con el registro exacto de las operaciones y personal.")
+        tab_dt1, tab_dt2 = st.tabs(["📝 Historial Completo de Asignaciones", "👥 Consolidado de Personal"])
+        
+        with tab_dt1:
+            df_mostrar = df_asig[['fecha', 'Nombre', 'tipo_dia', 'Categoria']].copy()
+            df_mostrar.columns = ['Fecha Asignada', 'Profesional', 'Rol Registrado', 'Tipo de Jornada']
+            df_mostrar = df_mostrar.sort_values(by='Fecha Asignada', ascending=False)
+            st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+            
+        with tab_dt2:
+            if len(lista_ingenieros) > 0:
+                df_pers = pd.DataFrame(lista_ingenieros)
+                df_pers['Estado Exención'] = df_pers.get('exento_disponibilidad', False).apply(lambda x: "Exento (No Motor)" if x else "Participa")
+                df_pers['En Inducción'] = df_pers.get('es_nuevo', False).apply(lambda x: "Sí" if x else "No")
+                cols_mostrar = ['nombre', 'rol', 'Estado Exención', 'En Inducción']
+                df_pers_show = df_pers[cols_mostrar].copy()
+                df_pers_show.columns = ['Nombre Completo', 'Rol Contractual', 'Estatus Guardia', '¿Es Nuevo?']
+                st.dataframe(df_pers_show, use_container_width=True, hide_index=True)
+
 # ==========================================
-# 📅 PESTAÑA 2: CALENDARIO MATRIZ E INTERACTIVO
+# 📅 PESTAÑA CALENDARIO MATRIZ E INTERACTIVO
 # ==========================================
 with t_cal:
     st.header("🗓️ Visualización de Disponibilidad")
@@ -484,7 +517,7 @@ with t_cal:
                 st.divider()
 
 # ==========================================
-# 📩 PESTAÑA 3: PORTAL DE PROPUESTAS DE AUSENTISMOS
+# 📩 PESTAÑA PORTAL DE PROPUESTAS DE AUSENTISMOS
 # ==========================================
 with t_por:
     st.header("📩 Portal de Propuestas de Vacaciones y Ausentismos")
@@ -677,7 +710,7 @@ with t_por:
 # 🛑 BLOQUE ADMINISTRATIVO (Solo visible para Admin)
 # ==========================================
 if st.session_state.role == "admin":
-    # 👥 PESTAÑA 4: GESTIÓN DE EQUIPO
+    # 👥 PESTAÑA GESTIÓN DE EQUIPO
     with t_equi:
         st.header("👥 Gestión de Contratos y Equipo")
         col_form, col_tabla = st.columns([1, 2])
@@ -759,7 +792,7 @@ if st.session_state.role == "admin":
                                 st.rerun()
                             except Exception as e: st.error(f"Error: {e}")
 
-    # 🌴 PESTAÑA 5: AUSENTISMOS MANUALES Y RRHH
+    # 🌴 PESTAÑA PANEL RRHH
     with t_rrhh:
         st.header("🌴 Panel de RRHH: Ingreso Directo de Ausentismos")
         st.markdown("Usa esta pestaña sólo para subir vacaciones antiguas o incapacidades directas sin pasar por el portal de propuestas.")
@@ -789,7 +822,7 @@ if st.session_state.role == "admin":
                         supabase.table("vacaciones").delete().eq("id", vac_a_eliminar["id"]).execute()
                         st.rerun()
 
-    # ⚙️ PESTAÑA 6: MOTOR ALGORÍTMICO POR JORNADAS
+    # ⚙️ PESTAÑA MOTOR ALGORÍTMICO
     with t_mot:
         st.header("⚙️ Motor Algorítmico de Equidad por Jornadas Operativas")
         
@@ -889,7 +922,7 @@ if st.session_state.role == "admin":
                                 
                             lunes_guia = lunes_proximo
 
-                        # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN (Usando SOLO el historial previo a f_inicio_calc)
+                        # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN
                         conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros_motor} 
                         conteo_tipo_bloque = {ing["id"]: {"SEMANA": 0, "FDS": 0, "DESPACHO": 0} for ing in lista_ingenieros_motor} 
                         conteo_roles_hist = {ing["id"]: {"Líder": 0, "Apoyo": 0, "Supervisor": 0, "Despacho": 0} for ing in lista_ingenieros_motor}
@@ -903,11 +936,10 @@ if st.session_state.role == "admin":
                             def registrar_rol_hist(tipo_str, id_i):
                                 r_l = tipo_str.split("(")[-1].replace(")", "").strip()
                                 
-                                # 🚨 SEPARACIÓN: Despacho no afecta el registro de guardia
                                 if "DESPACHO" in r_l or "DESPACHO" in tipo_str:
                                     conteo_roles_hist[id_i]["Despacho"] += 1
                                     conteo_tipo_bloque[id_i]["DESPACHO"] += 1
-                                    return # Terminamos aquí para no sobrescribir ultimo_tipo_guardia
+                                    return 
                                     
                                 if "APOYO" in r_l: conteo_roles_hist[id_i]["Apoyo"] += 1
                                 elif "LÍDER" in r_l or "LIDER" in r_l: conteo_roles_hist[id_i]["Líder"] += 1
@@ -931,7 +963,6 @@ if st.session_state.role == "admin":
                                         bloques_hist += 1
                                         registrar_rol_hist(turnos_ing[i].get("tipo_dia", "").upper(), ing["id"])
                                     
-                                # 🚨 SEPARACIÓN: Buscar el último rol válido de guardia (ignorar despachos)
                                 for t in reversed(turnos_ing):
                                     ultimo_tipo_str = t.get("tipo_dia", "").upper()
                                     if "DESPACHO" not in ultimo_tipo_str:
@@ -971,7 +1002,6 @@ if st.session_state.role == "admin":
                                         roles_cubiertos_dia[f_m].add(rol)
                                     ing_cubiertos.add(m["ingeniero_id"])
                                 
-                                # Actualizar estado si hay un manual que NO sea despacho
                                 ing_m = m["ingeniero_id"]
                                 if ing_m in ultimo_tipo_guardia:
                                     if "DESPACHO" not in m["tipo_dia"].upper():
@@ -1017,27 +1047,22 @@ if st.session_state.role == "admin":
                                 if not all(ingreso <= d <= salida for d in b['fechas']): continue
                                 if es_fds and not ing.get("permite_fin_semana", True): continue
                                 
-                                # 🚨 SEPARACIÓN: Extraer todas las fechas asignadas para validar conflictos de solapamiento físico
                                 fechas_todas_ing = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"]]
                                 fechas_todas_ing.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"]])
                                 
                                 if any(f_b in fechas_todas_ing for f_b in b['fechas']):
-                                    continue # Nadie puede tomar dos turnos distintos físicamente el mismo día
+                                    continue 
                                 
-                                # 🚨 SEPARACIÓN: Cooldown de 20 días aislado y Adyacencia
                                 if b['tipo'] == 'DESPACHO':
-                                    # 1. Cooldown Despacho vs Despacho (20 días)
                                     fechas_evaluar_cooldown = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" in a.get("tipo_dia", "").upper()]
                                     fechas_evaluar_cooldown.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" in r.get("tipo_dia", "").upper()])
                                     
-                                    # 2. Adyacencia: Disponibilidades afectan Despachos (Radio de 7 días)
                                     fechas_guardia_adyacente = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" not in a.get("tipo_dia", "").upper()]
                                     fechas_guardia_adyacente.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" not in r.get("tipo_dia", "").upper()])
                                 else:
-                                    # Guardias (Semana/FDS): Cooldown 20 días vs otras guardias. Despachos no influyen.
                                     fechas_evaluar_cooldown = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" not in a.get("tipo_dia", "").upper()]
                                     fechas_evaluar_cooldown.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" not in r.get("tipo_dia", "").upper()])
-                                    fechas_guardia_adyacente = [] # No aplica para guardias
+                                    fechas_guardia_adyacente = [] 
                                     
                                 cooldown_valido = True
                                 for f_b in b['fechas']:
@@ -1049,7 +1074,6 @@ if st.session_state.role == "admin":
                                 
                                 if not cooldown_valido: continue
 
-                                # 🚨 Validación de Adyacencia (aplica solo para evaluación de Despachos)
                                 adyacencia_invalida = False
                                 if b['tipo'] == 'DESPACHO':
                                     for f_b in b['fechas']:
@@ -1117,7 +1141,6 @@ if st.session_state.role == "admin":
                                         ing_seleccionado = candidatos_apoyo.pop(0)
                                         candidatos_lider = [x for x in candidatos_lider if x["id"] != ing_seleccionado["id"]]
                                         conteo_roles_hist[ing_seleccionado["id"]]["Despacho"] += 1
-                                        # 🚨 SEPARACIÓN: NO se actualiza ultimo_rol_guardia para Despachos.
                                         asignaciones_finales_bloque.append((ing_seleccionado, "Despacho"))
                                         pool_roles_asignar.remove(r_necesario)
 
@@ -1146,7 +1169,6 @@ if st.session_state.role == "admin":
                                         ultimo_rol_guardia[ing_seleccionado["id"]] = "Apoyo"
                                         asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
                                 
-                            # INSERCIÓN FINAL
                             for sup in elegidos_sup:
                                 conteo_turnos[sup["id"]] += 1
                                 conteo_tipo_bloque[sup["id"]]["FDS"] += 1
@@ -1157,7 +1179,6 @@ if st.session_state.role == "admin":
                                         roles_cubiertos_dia[dia].add("Supervisor")
 
                             for ing, rol_asignado in asignaciones_finales_bloque:
-                                # 🚨 SEPARACIÓN: Despacho no afecta conteo_turnos general ni el registro de alternancia SEMANA/FDS
                                 if "Despacho" not in rol_asignado:
                                     conteo_turnos[ing["id"]] += 1
                                     ultimo_tipo_guardia[ing["id"]] = "FDS" if b['tipo'] == 'FDS' else "SEMANA" 
@@ -1186,7 +1207,7 @@ if st.session_state.role == "admin":
                     except Exception as e:
                         st.error(f"Error procesando el motor: {e}")
 
-    # 🔄 PESTAÑA 7: RELEVOS Y ASIGNACIÓN MANUAL
+    # 🔄 PESTAÑA ASIGNACIÓN MANUAL
     with t_man:
         st.header("🔄 Asignaciones y Relevos Manuales")
         col_r1, col_r2 = st.columns(2)
