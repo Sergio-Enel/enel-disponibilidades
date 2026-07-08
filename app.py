@@ -433,15 +433,22 @@ if "Dashboard" in pestana_actual:
             pivot_roles_cat['Total Consolidado'] = pivot_roles_cat.sum(axis=1)
             st.dataframe(pivot_roles_cat.sort_values(by="Total Consolidado", ascending=False), use_container_width=True)
 
-        st.markdown("#### 🧑‍💻 Análisis Individual por Profesional")
-        ing_analisis = st.selectbox("Selecciona un profesional para ver su distribución exacta:", lista_ingenieros, format_func=lambda x: x["nombre"], key="sel_indiv")
-        if ing_analisis:
-            df_indiv = roles_por_turno[roles_por_turno['Nombre'] == ing_analisis['nombre']]
-            if not df_indiv.empty:
-                fig_indiv = px.pie(df_indiv, names='Rol_Limpio', values='Cantidad_Turnos', title=f"Distribución de Roles - {ing_analisis['nombre']}", hole=0.4, color='Rol_Limpio', color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100", "Despacho": "#8e24aa"})
-                st.plotly_chart(fig_indiv, use_container_width=True)
-            else:
-                st.info("No hay turnos registrados para este profesional.")
+        st.markdown("---")
+        st.markdown("### 🔍 4. Análisis Específico de Roles por Tipo de Jornada")
+        conteo_roles_cat = roles_por_turno.groupby(['Nombre', 'Rol_Limpio', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
+        col_r1, col_r2 = st.columns([1, 1.8])
+        
+        with col_r1:
+            ing_filtrado = st.selectbox("Seleccione el profesional a auditar:", df_asig['Nombre'].unique())
+            fig_ind = px.bar(conteo_roles_cat[conteo_roles_cat['Nombre'] == ing_filtrado], x='Categoria', y='Cantidad_Turnos', color='Rol_Limpio', barmode='group', text_auto=True, title=f"Desglose para {ing_filtrado}", color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100", "Despacho": "#8e24aa"})
+            st.plotly_chart(fig_ind, use_container_width=True)
+
+        with col_r2:
+            pivot_roles_cat = conteo_roles_cat.pivot_table(index='Nombre', columns=['Categoria', 'Rol_Limpio'], values='Cantidad_Turnos', fill_value=0)
+            pivot_roles_cat.columns = [f"{col[1]} en {col[0]}" for col in pivot_roles_cat.columns]
+            pivot_roles_cat['Total Consolidado'] = pivot_roles_cat.sum(axis=1)
+            st.dataframe(pivot_roles_cat.sort_values(by="Total Consolidado", ascending=False), use_container_width=True)
+
 
         st.markdown("---")
 
