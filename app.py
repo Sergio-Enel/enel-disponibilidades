@@ -19,36 +19,6 @@ def init_connection():
 supabase = init_connection()
 
 # ==========================================
-# 🔐 SISTEMA DE AUTENTICACIÓN Y ROLES
-# ==========================================
-if "role" not in st.session_state:
-    st.session_state.role = None
-
-if st.session_state.role is None:
-    st.title("🔐 Acceso al Sistema de Disponibilidades")
-    st.markdown("Por favor, seleccione su perfil de acceso para continuar.")
-    
-    col_log1, col_log2, col_log3 = st.columns([1, 2, 1])
-    with col_log2:
-        st.info("ℹ️ **Empleados:** Acceso a consulta de turnos, envío de propuestas y métricas.")
-        tipo_acceso = st.radio("Perfil de Acceso:", ["👨‍💻 Empleado (Consulta y Solicitudes)", "🛡️ Administrador / Jefe"])
-        
-        if "Administrador" in tipo_acceso:
-            # 🚨 CONTRASEÑA DE ADMINISTRADOR AQUÍ
-            pwd = st.text_input("Contraseña de acceso:", type="password")
-            if st.button("Ingresar como Administrador", use_container_width=True):
-                if pwd == "AdminEnel2026*":  # <-- Cambia esta contraseña por la que desees
-                    st.session_state.role = "admin"
-                    st.rerun()
-                else:
-                    st.error("❌ Contraseña incorrecta.")
-        else:
-            if st.button("Ingresar como Empleado", use_container_width=True):
-                st.session_state.role = "empleado"
-                st.rerun()
-    st.stop() # Detiene la carga de la app hasta que se inicie sesión
-
-# ==========================================
 # 🛠️ FUNCIONES AUXILIARES Y RECUPERACIÓN DE DATOS
 # ==========================================
 def obtener_ingenieros(): 
@@ -69,6 +39,10 @@ def obtener_festivos_extra():
 
 def obtener_propuestas():
     try: return supabase.table("propuestas_ausentismos").select("*").execute().data
+    except: return []
+
+def obtener_contrasenas():
+    try: return supabase.table("credenciales_admin").select("*").execute().data
     except: return []
 
 def obtener_estilo_motivo(motivo, estado="Aprobado"):
@@ -99,11 +73,60 @@ lista_vacaciones = obtener_vacaciones()
 lista_asignaciones = obtener_asignaciones()
 lista_festivos_extra = obtener_festivos_extra()
 lista_propuestas = obtener_propuestas()
+lista_contrasenas = obtener_contrasenas()
 
 dict_nombres_ing = {ing["id"]: ing["nombre"] for ing in lista_ingenieros}
 
 # ==========================================
-# 👨‍💻 BARRA LATERAL (CRÉDITOS Y FESTIVOS GLOBALES)
+# 🔐 SISTEMA DE AUTENTICACIÓN Y ROLES
+# ==========================================
+if "role" not in st.session_state:
+    st.session_state.role = None
+
+if st.session_state.role is None:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col_logo, col_titulo = st.columns([1, 4])
+    
+    with col_titulo:
+        st.title("⚡ Sistema de Asignación de Disponibilidades")
+        st.markdown("Plataforma de Control Operativo y Equidad")
+    
+    st.markdown("<hr>", unsafe_allow_html=True)
+    
+    col_log1, col_log2, col_log3 = st.columns([1, 2, 1])
+    with col_log2:
+        st.info("ℹ️ **Empleados:** Acceso a consulta de turnos, envío de propuestas y métricas.")
+        tipo_acceso = st.radio("Perfil de Acceso:", ["👨‍💻 Empleado (Consulta y Solicitudes)", "🛡️ Administrador / Jefe"])
+        
+        if "Administrador" in tipo_acceso:
+            pwd = st.text_input("Contraseña de acceso:", type="password")
+            if st.button("Ingresar como Administrador", use_container_width=True):
+                # Validar contra base de datos + clave maestra
+                claves_validas = [p['password'] for p in lista_contrasenas] if lista_contrasenas else []
+                claves_validas.append("AdminEnel2026*") # Clave maestra de respaldo
+                
+                if pwd in claves_validas:
+                    st.session_state.role = "admin"
+                    st.rerun()
+                else:
+                    st.error("❌ Contraseña incorrecta.")
+        else:
+            if st.button("Ingresar como Empleado", use_container_width=True):
+                st.session_state.role = "empleado"
+                st.rerun()
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        # 🔥 NUEVOS CRÉDITOS EN LA ZONA DE SELECCIÓN DE PERFIL
+        st.markdown("""
+        <div style='text-align: center; color: #666; font-size: 14px; margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd;'>
+            <i>Herramienta desarrollada para <b>Enel Colombia</b></i><br>
+            Diseño e implementación por <b>Sergio Cutiva</b>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    st.stop()
+# ==========================================
+# 👨‍💻 BARRA LATERAL (CONFIGURACIÓN)
 # ==========================================
 with st.sidebar:
     st.markdown(f"### ⚡ ENEL Colombia")
@@ -115,6 +138,33 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
+    
+    # 🔐 GESTOR DE CONTRASEÑAS (SOLO ADMIN)
+    if st.session_state.role == "admin":
+        with st.expander("🔐 Gestión de Contraseñas", expanded=False):
+            st.caption("Administra las claves de acceso al sistema.")
+            nueva_pwd = st.text_input("Agregar nueva contraseña:", type="password")
+            if st.button("💾 Guardar Contraseña"):
+                if nueva_pwd:
+                    try:
+                        supabase.table("credenciales_admin").insert({"password": nueva_pwd}).execute()
+                        st.success("Contraseña añadida.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"¿Creaste la tabla 'credenciales_admin'? Detalle: {e}")
+            
+            if lista_contrasenas:
+                st.markdown("---")
+                st.markdown("**Contraseñas Registradas:**")
+                for p in lista_contrasenas:
+                    col_pwd1, col_pwd2 = st.columns([3, 1])
+                    col_pwd1.code("*" * len(p['password'])) # Mostrar oculta
+                    if col_pwd2.button("🗑️", key=f"del_pwd_{p['id']}"):
+                        try:
+                            supabase.table("credenciales_admin").delete().eq("id", p["id"]).execute()
+                            st.rerun()
+                        except: pass
+        st.markdown("---")
     
     with st.expander("📆 Configuración de Festivos Fijos", expanded=False):
         str_festivos_default = (
@@ -155,37 +205,170 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 7.0 | Autenticación y Auditoría RBAC")
+    st.caption("Versión 8.0 | Dashboard Pro & RBAC")
 
 # ==========================================
-# ⚡ INTERFAZ PRINCIPAL CON RESTRICCIÓN DE PESTAÑAS
+# ⚡ INTERFAZ PRINCIPAL
 # ==========================================
 FECHA_MIN = date(2026, 1, 1)
 
-st.title("⚡ Sistema de Asignación de Disponibilidades")
-st.markdown("Matriz de control por jornadas, ausentismos y equidad operativa.")
+st.title("⚡ Panel Operativo de Disponibilidades")
 st.markdown("---")
 
-# Renderizado Condicional de Pestañas
 if st.session_state.role == "admin":
-    t_cal, t_por, t_dash, t_equi, t_rrhh, t_mot, t_man = st.tabs([
+    t_dash, t_cal, t_por, t_equi, t_rrhh, t_mot, t_man = st.tabs([
+        "📊 Dashboard Ejecutivo",
         "📅 Calendario Operativo", 
         "📩 Portal de Ausentismos", 
-        "📊 Dashboard Ejecutivo",
         "👥 Gestión de Equipo", 
         "🌴 Panel RRHH", 
         "⚙️ Motor Algorítmico",
         "🔄 Asignaciones Manuales"
     ])
 else:
-    t_cal, t_por, t_dash = st.tabs([
+    t_dash, t_cal, t_por = st.tabs([
+        "📊 Dashboard y Auditoría",
         "📅 Calendario Operativo", 
-        "📩 Portal de Ausentismos", 
-        "📊 Dashboard y Auditoría"
+        "📩 Portal de Solicitudes"
     ])
 
 # ==========================================
-# 📅 PESTAÑA 1: CALENDARIO MATRIZ E INTERACTIVO
+# 📊 PESTAÑA 1: DASHBOARD Y AUDITORÍA (EXPANDIDO)
+# ==========================================
+with t_dash:
+    st.header("📈 Panel de Análisis Operativo")
+    
+    # 🎯 1. KPIs GLOBALES
+    if len(lista_ingenieros) > 0:
+        total_ing = len([i for i in lista_ingenieros if not i.get('exento_disponibilidad', False)])
+        total_turnos = len(lista_asignaciones)
+        total_ausencias = sum([(datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1 for v in lista_vacaciones]) if lista_vacaciones else 0
+        prop_pendientes = len([p for p in lista_propuestas if p.get('estado') == 'Pendiente'])
+        
+        col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+        col_k1.metric(label="👥 Ingenieros Activos (Motor)", value=total_ing)
+        col_k2.metric(label="⚡ Total Turnos Asignados", value=total_turnos)
+        col_k3.metric(label="🌴 Días de Ausentismo (Año)", value=total_ausencias)
+        col_k4.metric(label="⏳ Propuestas Pendientes", value=prop_pendientes)
+        st.markdown("---")
+
+    # 🕵️ 2. MÓDULO DE AUDITORÍA
+    st.markdown("### 🕵️ Auditoría de Transparencia (Motor Algorítmico)")
+    st.caption("Verifica el cumplimiento de los tiempos de descanso (cooldown) y alternancia de turnos de cualquier compañero.")
+    ing_auditar = st.selectbox("Selecciona un profesional para auditar su historial reciente:", lista_ingenieros, format_func=lambda x: x["nombre"])
+    if ing_auditar:
+        turnos_ing_audit = sorted([a for a in lista_asignaciones if a["ingeniero_id"] == ing_auditar["id"]], key=lambda x: datetime.strptime(x["fecha"], "%Y-%m-%d"), reverse=True)
+        if turnos_ing_audit:
+            col_aud1, col_aud2 = st.columns([1, 2])
+            with col_aud1:
+                st.success(f"Últimos registros de **{ing_auditar['nombre']}**:")
+                for t in turnos_ing_audit[:6]:
+                    st.markdown(f"- 📅 **{t['fecha']}** : {t['tipo_dia']}")
+            with col_aud2:
+                st.info("💡 **Reglas verificadas por el sistema:**\n- 20 días mínimo entre bloques de guardia.\n- Sin FDS consecutivos.\n- Adyacencia mínima de 7 días para Despachos.")
+        else:
+            st.write("No hay turnos registrados en el historial para esta persona.")
+    
+    st.markdown("---")
+    
+    # 📈 3. ANÁLISIS DE CARGA (GRÁFICOS)
+    if len(lista_asignaciones) == 0: 
+        st.warning("No hay turnos asignados para analizar gráficas.")
+    else:
+        df_asig = pd.DataFrame(lista_asignaciones)
+        df_asig['Nombre'] = df_asig['ingeniero_id'].map(dict_nombres_ing)
+        
+        def categorizar_turno(row):
+            tipo = row['tipo_dia'].upper()
+            fecha_str = row['fecha']
+            fecha_dt = pd.to_datetime(fecha_str)
+            if "DESPACHO" in tipo: return "DESPACHO"
+            if "FDS" in tipo: return "FDS"
+            if "SEMANA" in tipo: return "SEMANA"
+            if "MANUAL" in tipo:
+                if fecha_dt.weekday() >= 4: return "FDS"
+                elif fecha_dt.weekday() == 0 and fecha_str in festivos_colombia_lista: return "FDS"
+                else: return "SEMANA"
+            return "SEMANA"
+            
+        df_asig['Categoria'] = df_asig.apply(categorizar_turno, axis=1)
+        df_asig['Fecha_dt'] = pd.to_datetime(df_asig['fecha'])
+        df_asig['Mes'] = df_asig['Fecha_dt'].dt.strftime('%Y-%m') # Para línea de tiempo
+        
+        # Bloques continuos
+        df_asig = df_asig.sort_values(['Nombre', 'Categoria', 'Fecha_dt'])
+        df_asig['Dias_Dif'] = df_asig.groupby(['Nombre', 'Categoria'])['Fecha_dt'].diff().dt.days
+        df_asig['Nuevo_Turno'] = (df_asig['Dias_Dif'] > 1).astype(int)
+        df_asig['Nuevo_Turno'] = df_asig['Nuevo_Turno'].fillna(1) 
+        df_asig['ID_Bloque'] = df_asig.groupby(['Nombre', 'Categoria'])['Nuevo_Turno'].cumsum()
+        df_turnos_agrupados = df_asig.groupby(['Nombre', 'Categoria', 'ID_Bloque']).size().reset_index(name='Dias_en_Turno')
+        conteo_turnos_reales = df_turnos_agrupados.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
+
+        st.markdown("### ⚖️ Distribución de Carga Operativa")
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            fig_turnos = px.bar(conteo_turnos_reales, x='Nombre', y='Cantidad_Turnos', color='Categoria', title="Bloques de Guardia Asignados (Semana vs FDS)", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True)
+            st.plotly_chart(fig_turnos, use_container_width=True)
+        with col_g2:
+            conteo_dias = df_asig.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Dias')
+            fig_dias = px.bar(conteo_dias, x='Nombre', y='Cantidad_Dias', color='Categoria', title="Días Exactos Trabajados", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True)
+            st.plotly_chart(fig_dias, use_container_width=True)
+
+        st.markdown("---")
+        
+        # 📈 4. LÍNEA DE TIEMPO / EVOLUCIÓN (NUEVO)
+        st.markdown("### 📈 Evolución de Carga por Mes")
+        tendencia_mes = df_asig.groupby(['Mes', 'Categoria']).size().reset_index(name='Turnos')
+        fig_linea = px.line(tendencia_mes, x='Mes', y='Turnos', color='Categoria', markers=True, title="Histórico de Ocupación por Mes", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"})
+        st.plotly_chart(fig_linea, use_container_width=True)
+
+        st.markdown("---")
+
+        # 🌴 5. IMPACTO DE AUSENTISMOS
+        st.markdown("### 🌴 Impacto de Ausentismos")
+        if len(lista_vacaciones) > 0:
+            vac_records = []
+            for v in lista_vacaciones:
+                nom = dict_nombres_ing.get(v['ingeniero_id'], 'Desconocido')
+                dias_fuera = (datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1
+                vac_records.append({'Nombre': nom, 'Motivo': v.get('motivo', 'Otro'), 'Dias_Ausente': dias_fuera})
+            df_vac_stats = pd.DataFrame(vac_records).groupby(['Nombre', 'Motivo'])['Dias_Ausente'].sum().reset_index()
+            
+            col_v1, col_v2 = st.columns([2, 1])
+            with col_v1:
+                fig_vac_bar = px.bar(df_vac_stats, x='Nombre', y='Dias_Ausente', color='Motivo', title="Días Totales de Ausencia por Profesional", text_auto=True, color_discrete_map={"Vacaciones": "#00bcd4", "Incapacidad Médica": "#f44336", "Permiso Empresa": "#9c27b0", "Licencia": "#4caf50", "Festivo": "#283593", "Otro": "#ff9800"})
+                st.plotly_chart(fig_vac_bar, use_container_width=True)
+            with col_v2: 
+                st.plotly_chart(px.pie(df_vac_stats, names='Motivo', values='Dias_Ausente', title="Motivos Globales", hole=0.4), use_container_width=True)
+        else: st.info("No hay registros de ausentismos para analizar.")
+
+        st.markdown("---")
+        
+        # 🎭 6. DESGLOSE PROFUNDO DE ROLES
+        df_asig['Rol_Limpio'] = df_asig['tipo_dia'].apply(lambda x: x.split('(')[-1].replace(')', '').strip() if '(' in x else x)
+        df_asig['Rol_Limpio'] = df_asig['Rol_Limpio'].replace({"Apoyo 1": "Apoyo", "Apoyo 2": "Apoyo", "Despacho 6 AM": "Despacho"})
+        roles_por_turno = df_asig.groupby(['Nombre', 'Rol_Limpio', 'ID_Bloque', 'Categoria']).size().reset_index(name='Dias_En_Rol')
+        conteo_roles = roles_por_turno.groupby(['Nombre', 'Rol_Limpio']).size().reset_index(name='Cantidad_Turnos')
+        
+        st.markdown("### 🎭 Análisis Profundo de Roles Específicos")
+        col_r_gen, col_r_det = st.columns([1, 1])
+        
+        with col_r_gen:
+            fig_roles = px.bar(conteo_roles, y='Nombre', x='Cantidad_Turnos', color='Rol_Limpio', title="Consolidado Total de Funciones", color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100", "Despacho": "#8e24aa"}, orientation='h', barmode='stack', text_auto=True)
+            fig_roles.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig_roles, use_container_width=True)
+            
+        with col_r_det:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.caption("Detalle Matricial de Turnos por Profesional")
+            conteo_roles_cat = roles_por_turno.groupby(['Nombre', 'Rol_Limpio', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
+            pivot_roles_cat = conteo_roles_cat.pivot_table(index='Nombre', columns=['Categoria', 'Rol_Limpio'], values='Cantidad_Turnos', fill_value=0)
+            pivot_roles_cat.columns = [f"{col[1]} en {col[0]}" for col in pivot_roles_cat.columns]
+            pivot_roles_cat['Total Consolidado'] = pivot_roles_cat.sum(axis=1)
+            st.dataframe(pivot_roles_cat.sort_values(by="Total Consolidado", ascending=False), use_container_width=True)
+
+# ==========================================
+# 📅 PESTAÑA 2: CALENDARIO MATRIZ E INTERACTIVO
 # ==========================================
 with t_cal:
     st.header("🗓️ Visualización de Disponibilidad")
@@ -301,7 +484,7 @@ with t_cal:
                 st.divider()
 
 # ==========================================
-# 📩 PESTAÑA 2: PORTAL DE PROPUESTAS DE AUSENTISMOS
+# 📩 PESTAÑA 3: PORTAL DE PROPUESTAS DE AUSENTISMOS
 # ==========================================
 with t_por:
     st.header("📩 Portal de Propuestas de Vacaciones y Ausentismos")
@@ -491,113 +674,6 @@ with t_por:
             st.markdown("<small><b>Leyenda:</b> ⏳ Pendiente | 🌴 Aprobado | ❌ Rechazado</small>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 PESTAÑA 3: DASHBOARD Y AUDITORÍA
-# ==========================================
-with t_dash:
-    st.header("📈 Panel de Análisis, Equidad y Auditoría Operativa")
-    
-    # 🕵️ MÓDULO DE AUDITORÍA DE TRANSPARENCIA
-    st.markdown("### 🕵️ Auditoría de Asignaciones (Reglas de Motor)")
-    st.caption("Verifica el cumplimiento de los tiempos de descanso (cooldown), alternancia de FDS y asignaciones recientes de cualquier compañero.")
-    ing_auditar = st.selectbox("Selecciona un profesional para auditar su historial:", lista_ingenieros, format_func=lambda x: x["nombre"])
-    if ing_auditar:
-        # Extraer turnos ordenados por fecha descendente
-        turnos_ing_audit = sorted([a for a in lista_asignaciones if a["ingeniero_id"] == ing_auditar["id"]], key=lambda x: datetime.strptime(x["fecha"], "%Y-%m-%d"), reverse=True)
-        if turnos_ing_audit:
-            st.success(f"Registros encontrados para **{ing_auditar['nombre']}**:")
-            # Mostrar los últimos 6 días operativos
-            for t in turnos_ing_audit[:6]:
-                tipo_limpio = t['tipo_dia'].replace("(", "**(").replace(")", ")**")
-                st.markdown(f"- 📅 **{t['fecha']}** : Asignado a {tipo_limpio}")
-            st.info("💡 *Nota: El motor verifica que haya al menos 20 días de diferencia entre turnos de guardia (Despacho se calcula por separado) y evita FDS consecutivos.*")
-        else:
-            st.write("No hay turnos registrados en el historial para esta persona.")
-    
-    st.markdown("---")
-    
-    if len(lista_asignaciones) == 0: st.warning("No hay turnos asignados para analizar gráficas.")
-    else:
-        df_asig = pd.DataFrame(lista_asignaciones)
-        df_asig['Nombre'] = df_asig['ingeniero_id'].map(dict_nombres_ing)
-        
-        def categorizar_turno(row):
-            tipo = row['tipo_dia'].upper()
-            fecha_str = row['fecha']
-            fecha_dt = pd.to_datetime(fecha_str)
-            if "DESPACHO" in tipo: return "DESPACHO"
-            if "FDS" in tipo: return "FDS"
-            if "SEMANA" in tipo: return "SEMANA"
-            if "MANUAL" in tipo:
-                if fecha_dt.weekday() >= 4: return "FDS"
-                elif fecha_dt.weekday() == 0 and fecha_str in festivos_colombia_lista: return "FDS"
-                else: return "SEMANA"
-            return "SEMANA"
-            
-        df_asig['Categoria'] = df_asig.apply(categorizar_turno, axis=1)
-        df_asig['Fecha_dt'] = pd.to_datetime(df_asig['fecha'])
-        df_asig = df_asig.sort_values(['Nombre', 'Categoria', 'Fecha_dt'])
-        df_asig['Dias_Dif'] = df_asig.groupby(['Nombre', 'Categoria'])['Fecha_dt'].diff().dt.days
-        df_asig['Nuevo_Turno'] = (df_asig['Dias_Dif'] > 1).astype(int)
-        df_asig['Nuevo_Turno'] = df_asig['Nuevo_Turno'].fillna(1) 
-        df_asig['ID_Bloque'] = df_asig.groupby(['Nombre', 'Categoria'])['Nuevo_Turno'].cumsum()
-        df_turnos_agrupados = df_asig.groupby(['Nombre', 'Categoria', 'ID_Bloque']).size().reset_index(name='Dias_en_Turno')
-        conteo_turnos_reales = df_turnos_agrupados.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
-
-        st.markdown("### ⚖️ 1. Distribución de Carga Operativa")
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
-            fig_turnos = px.bar(conteo_turnos_reales, x='Nombre', y='Cantidad_Turnos', color='Categoria', title="Conteo por Bloques Completados", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True)
-            st.plotly_chart(fig_turnos, use_container_width=True)
-        with col_g2:
-            conteo_dias = df_asig.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Dias')
-            fig_dias = px.bar(conteo_dias, x='Nombre', y='Cantidad_Dias', color='Categoria', title="Visualización por Días Trabajados", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True)
-            st.plotly_chart(fig_dias, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("### 🌴 2. Impacto de Ausentismos")
-        if len(lista_vacaciones) > 0:
-            vac_records = []
-            for v in lista_vacaciones:
-                nom = dict_nombres_ing.get(v['ingeniero_id'], 'Desconocido')
-                dias_fuera = (datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1
-                vac_records.append({'Nombre': nom, 'Motivo': v.get('motivo', 'Otro'), 'Dias_Ausente': dias_fuera})
-            df_vac_stats = pd.DataFrame(vac_records).groupby(['Nombre', 'Motivo'])['Dias_Ausente'].sum().reset_index()
-            
-            col_v1, col_v2 = st.columns([2, 1])
-            with col_v1:
-                fig_vac_bar = px.bar(df_vac_stats, x='Nombre', y='Dias_Ausente', color='Motivo', title="Días Totales de Ausencia por Profesional", text_auto=True, color_discrete_map={"Vacaciones": "#00bcd4", "Incapacidad Médica": "#f44336", "Permiso Empresa": "#9c27b0", "Licencia": "#4caf50", "Festivo": "#283593", "Otro": "#ff9800"})
-                st.plotly_chart(fig_vac_bar, use_container_width=True)
-            with col_v2: st.plotly_chart(px.pie(df_vac_stats, names='Motivo', values='Dias_Ausente', title="Motivos Generales", hole=0.4), use_container_width=True)
-        else: st.info("No hay registros de ausentismos para analizar.")
-
-        st.markdown("---")
-        df_asig['Rol_Limpio'] = df_asig['tipo_dia'].apply(lambda x: x.split('(')[-1].replace(')', '').strip() if '(' in x else x)
-        df_asig['Rol_Limpio'] = df_asig['Rol_Limpio'].replace({"Apoyo 1": "Apoyo", "Apoyo 2": "Apoyo", "Despacho 6 AM": "Despacho"})
-        roles_por_turno = df_asig.groupby(['Nombre', 'Rol_Limpio', 'ID_Bloque', 'Categoria']).size().reset_index(name='Dias_En_Rol')
-        conteo_roles = roles_por_turno.groupby(['Nombre', 'Rol_Limpio']).size().reset_index(name='Cantidad_Turnos')
-        
-        st.markdown("### 🎭 3. Distribución General de Roles")
-        fig_roles = px.bar(conteo_roles, y='Nombre', x='Cantidad_Turnos', color='Rol_Limpio', title="Consolidado Total de Funciones", color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100", "Despacho": "#8e24aa"}, orientation='h', barmode='stack', text_auto=True)
-        fig_roles.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_roles, use_container_width=True)
-        
-        st.markdown("---")
-        st.markdown("### 🔍 4. Análisis Específico de Roles por Tipo de Jornada")
-        conteo_roles_cat = roles_por_turno.groupby(['Nombre', 'Rol_Limpio', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
-        col_r1, col_r2 = st.columns([1, 1.8])
-        
-        with col_r1:
-            ing_filtrado = st.selectbox("Seleccione el profesional a auditar su partición de roles:", df_asig['Nombre'].unique())
-            fig_ind = px.bar(conteo_roles_cat[conteo_roles_cat['Nombre'] == ing_filtrado], x='Categoria', y='Cantidad_Turnos', color='Rol_Limpio', barmode='group', text_auto=True, title=f"Desglose para {ing_filtrado}", color_discrete_map={"Líder": "#1565c0", "Apoyo": "#2e7d32", "Supervisor": "#e65100", "Despacho": "#8e24aa"})
-            st.plotly_chart(fig_ind, use_container_width=True)
-
-        with col_r2:
-            pivot_roles_cat = conteo_roles_cat.pivot_table(index='Nombre', columns=['Categoria', 'Rol_Limpio'], values='Cantidad_Turnos', fill_value=0)
-            pivot_roles_cat.columns = [f"{col[1]} en {col[0]}" for col in pivot_roles_cat.columns]
-            pivot_roles_cat['Total Consolidado'] = pivot_roles_cat.sum(axis=1)
-            st.dataframe(pivot_roles_cat.sort_values(by="Total Consolidado", ascending=False), use_container_width=True)
-
-# ==========================================
 # 🛑 BLOQUE ADMINISTRATIVO (Solo visible para Admin)
 # ==========================================
 if st.session_state.role == "admin":
@@ -611,7 +687,7 @@ if st.session_state.role == "admin":
             nombre = st.text_input("Nombre Completo:").strip().upper()
             rol = st.selectbox("Rol Fijo:", ["Ingeniero (Líder/Apoyo)", "Supervisor"])
             permite_fds = st.radio("¿Turnos Fin de Semana?", [True, False], format_func=lambda x: "Sí" if x else "No (Restringido)")
-            es_nuevo = st.radio("¿Es nuevo? (Prioridad Diciembre)", [False, True], format_func=lambda x: "Sí" if x else "No")
+            es_nuevo = st.radio("¿Es nuevo? (Prioridad Inducción)", [False, True], format_func=lambda x: "Sí" if x else "No")
             
             st.markdown("---")
             st.markdown("**Participación en Disponibilidades**")
