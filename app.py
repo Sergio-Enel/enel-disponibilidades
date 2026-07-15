@@ -277,7 +277,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 11.2 | Fix Vacíos & Festivos Extendidos")
+    st.caption("Versión 11.3 | Optimización estricta de Cargas y Cooldown")
 
 # ==========================================
 # ⚡ INTERFAZ PRINCIPAL (NAVEGADOR HORIZONTAL)
@@ -303,7 +303,6 @@ else:
         "📩 Portal de Ausentismos"
     ]
 
-# Solución definitiva al error visual de los Tabs en Streamlit
 pestana_actual = st.radio("Menú Principal:", opciones_nav, horizontal=True, label_visibility="collapsed")
 st.markdown("---")
 
@@ -436,7 +435,7 @@ if "Dashboard" in pestana_actual:
             st.dataframe(pivot_roles_cat.sort_values(by="Total Consolidado", ascending=False), use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### 🔍 4. Análisis Específico de Roles por Tipo de Jornada")
+        st.markdown("### 🔍 Análisis Específico de Roles por Tipo de Jornada")
         conteo_roles_cat = roles_por_turno.groupby(['Nombre', 'Rol_Limpio', 'Categoria']).size().reset_index(name='Cantidad_Turnos')
         col_r1, col_r2 = st.columns([1, 1.8])
         
@@ -1099,7 +1098,17 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                                     turnos_por_mes[ing["id"]][f_actual.month] = turnos_por_mes[ing["id"]].get(f_actual.month, 0) + 1
                                     registrar_rol_hist(turnos_man_futuros[i].get("tipo_dia", "").upper(), ing["id"])
                             
+                            # ⚡ MEJORA: Sumamos los turnos manuales para que cuenten en el balanceo general.
                             conteo_turnos[ing["id"]] += bloques_hist_man
+                            
+                            # ⚡ MEJORA: Validar el último rol futuro manual para que el motor no lo asigne repetido en lo automático.
+                            for t in reversed(turnos_man_futuros):
+                                ultimo_tipo_str = t.get("tipo_dia", "").upper()
+                                if "DESPACHO" not in ultimo_tipo_str:
+                                    if "LÍDER" in ultimo_tipo_str or "LIDER" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Líder"
+                                    elif "APOYO" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Apoyo"
+                                    elif "SUPERVISOR" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Supervisor"
+                                    break
                     
                     vacaciones_por_ing = {ing["id"]: set() for ing in lista_ingenieros_motor}
                     for v in lista_vacaciones:
@@ -1135,6 +1144,15 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             if ing_m in ultimo_tipo_guardia:
                                 if "DESPACHO" not in m["tipo_dia"].upper():
                                     ultimo_tipo_guardia[ing_m] = "FDS" if b['tipo'] == 'FDS' else "SEMANA"
+                                    
+                                    # ⚡ MEJORA: Actualizamos dinámicamente el último rol cuando escaneamos uno manual
+                                    tipo_str = m["tipo_dia"].upper()
+                                    if "LÍDER" in tipo_str or "LIDER" in tipo_str:
+                                        ultimo_rol_guardia[ing_m] = "Líder"
+                                    elif "APOYO" in tipo_str:
+                                        ultimo_rol_guardia[ing_m] = "Apoyo"
+                                    elif "SUPERVISOR" in tipo_str:
+                                        ultimo_rol_guardia[ing_m] = "Supervisor"
 
                         roles_sup_necesarios, roles_ing_necesarios = [], []
 
@@ -1191,7 +1209,7 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             if en_vacaciones_directas or (dia_antes in dias_vac) or (dia_despues in dias_vac) or es_sandwich_antes or es_sandwich_despues:
                                 continue 
                             
-                            # REGLAS FLEXIBLES
+                            # REGLAS FLEXIBLES (Candidatos estrictos vs Backup)
                             rompe_regla_soft = False
                             
                             if es_fds and ultimo_tipo_guardia[ing["id"]] == "FDS" and not es_supervisor:
@@ -1207,7 +1225,7 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             cooldown_valido = True
                             for f_b in b['fechas']:
                                 for f_i in fechas_evaluar_cooldown:
-                                    if abs((f_b - f_i).days) <= 20:
+                                    if abs((f_b - f_i).days) <= 20:  # ⚡ REGLA: Mínimo 20 días de distancia estrictos.
                                         cooldown_valido = False
                                         break
                                 if not cooldown_valido: break
@@ -1232,14 +1250,16 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                                 if es_supervisor: elegibles_sup_strict.append(ing)
                                 else: elegibles_ing_strict.append(ing)
                                 
-                        # RELLENAR HUECOS (Mecanismo Anti-Huecos)
+                        # RELLENAR HUECOS (Mecanismo Anti-Huecos, último recurso)
                         cant_sup_necesarios = len(roles_sup_necesarios)
                         while len(elegibles_sup_strict) < cant_sup_necesarios and elegibles_sup_backup:
+                            # ⚡ MEJORA: Al recurrir al Backup (último recurso), seguimos priorizando a quien menos carga total tenga.
                             elegibles_sup_backup.sort(key=lambda x: conteo_turnos[x["id"]])
                             elegibles_sup_strict.append(elegibles_sup_backup.pop(0))
 
                         cant_ing_necesarios = len([r for r in roles_ing_necesarios if "Líder" in r or "Apoyo" in r or "Despacho" in r])
                         while len(elegibles_ing_strict) < cant_ing_necesarios and elegibles_ing_backup:
+                            # ⚡ MEJORA: Sacar de backup priorizando equidad global.
                             elegibles_ing_backup.sort(key=lambda x: conteo_turnos[x["id"]])
                             elegibles_ing_strict.append(elegibles_ing_backup.pop(0))
 
@@ -1256,7 +1276,9 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                                         prioridad_mes = -1
                                         
                                 es_nuevo_val = -1 if x.get("es_nuevo", False) and es_critico else 0
-                                return (prioridad_mes, es_nuevo_val, conteo_tipo_bloque[x["id"]].get(tipo_bloque_evaluado, 0), conteo_turnos[x["id"]])
+                                
+                                # ⚡ MEJORA: El conteo global de turnos es el OBJETIVO PRINCIPAL para la elección justa.
+                                return (prioridad_mes, conteo_turnos[x["id"]], conteo_tipo_bloque[x["id"]].get(tipo_bloque_evaluado, 0), es_nuevo_val)
                                 
                             pool.sort(key=sort_key)
                             return pool[:cantidad]
@@ -1290,7 +1312,8 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                         for r_necesario in list(pool_roles_asignar):
                             if "Despacho" in r_necesario:
                                 if candidatos_apoyo:
-                                    candidatos_apoyo.sort(key=lambda x: conteo_roles_hist[x["id"]]["Despacho"])
+                                    # ⚡ MEJORA: Ordenar por cantidad de turnos global para equilibrar al más descansado.
+                                    candidatos_apoyo.sort(key=lambda x: (conteo_turnos[x["id"]], conteo_roles_hist[x["id"]]["Despacho"]))
                                     ing_seleccionado = candidatos_apoyo.pop(0)
                                     candidatos_lider = [x for x in candidatos_lider if x["id"] != ing_seleccionado["id"]]
                                     conteo_roles_hist[ing_seleccionado["id"]]["Despacho"] += 1
@@ -1301,9 +1324,12 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             if "Líder" in r_necesario:
                                 if candidatos_lider:
                                     candidatos_validos_lider = [x for x in candidatos_lider if ultimo_rol_guardia.get(x["id"]) != "Líder"]
-                                    if not candidatos_validos_lider: candidatos_validos_lider = candidatos_lider
+                                    if not candidatos_validos_lider: 
+                                        # ⚡ MEJORA: Último recurso forzado, si no hay opciones, rompe la regla del Líder repetido.
+                                        candidatos_validos_lider = candidatos_lider
                                         
-                                    candidatos_validos_lider.sort(key=lambda x: (x.get("es_nuevo", False), conteo_roles_hist[x["id"]]["Líder"]))
+                                    # ⚡ MEJORA: Asegura Nivelación Prioritaria de Carga global.
+                                    candidatos_validos_lider.sort(key=lambda x: (conteo_turnos[x["id"]], x.get("es_nuevo", False), conteo_roles_hist[x["id"]]["Líder"]))
                                     ing_seleccionado = candidatos_validos_lider.pop(0)
                                     
                                     candidatos_lider = [x for x in candidatos_lider if x["id"] != ing_seleccionado["id"]]
@@ -1316,7 +1342,8 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                         for r_necesario in list(pool_roles_asignar):
                             if "Apoyo" in r_necesario:
                                 if candidatos_apoyo:
-                                    candidatos_apoyo.sort(key=lambda x: conteo_roles_hist[x["id"]]["Apoyo"])
+                                    # ⚡ MEJORA: Apoyo también se asigna primero al que menos carga general tiene.
+                                    candidatos_apoyo.sort(key=lambda x: (conteo_turnos[x["id"]], conteo_roles_hist[x["id"]]["Apoyo"]))
                                     ing_seleccionado = candidatos_apoyo.pop(0)
                                     conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
                                     ultimo_rol_guardia[ing_seleccionado["id"]] = "Apoyo"
@@ -1353,7 +1380,7 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Optimización completada con éxito!")
+                        st.success("✅ ¡Optimización completada con éxito logrando cargas niveladas!")
                         st.balloons()
                         st.rerun()
                     elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango y calcula desde cero)":
