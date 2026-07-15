@@ -277,7 +277,7 @@ with st.sidebar:
     st.markdown("👨‍💻 **Sergio Cutiva**")
     st.markdown("📧 *sergio.cutiva@enel.com*")
     st.markdown("---")
-    st.caption("Versión 11.3 | Optimización estricta de Cargas y Cooldown")
+    st.caption("Versión 11.4 | División Despachos vs Guardias, Cierre Estricto")
 
 # ==========================================
 # ⚡ INTERFAZ PRINCIPAL (NAVEGADOR HORIZONTAL)
@@ -337,7 +337,7 @@ if "Dashboard" in pestana_actual:
                 for t in turnos_ing_audit[:6]:
                     st.markdown(f"- 📅 **{t['fecha']}** : {t['tipo_dia']}")
             with col_aud2:
-                st.info("💡 **Reglas verificadas por el sistema:**\n- 20 días mínimo entre bloques de guardia.\n- Sin FDS consecutivos.\n- Adyacencia mínima de 7 días para Despachos.")
+                st.info("💡 **Reglas verificadas por el sistema:**\n- 20 días mínimo entre bloques de guardia.\n- Sin FDS consecutivos ni de seguido.\n- Adyacencia mínima de 7 días estricta aislando Despachos.")
         else:
             st.write("No hay turnos registrados en el historial para esta persona.")
     
@@ -377,7 +377,7 @@ if "Dashboard" in pestana_actual:
         st.markdown("### ⚖️ Distribución de Carga Operativa")
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            fig_turnos = px.bar(conteo_turnos_reales, x='Nombre', y='Cantidad_Turnos', color='Categoria', title="Bloques de Guardia Asignados (Semana vs FDS)", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True)
+            fig_turnos = px.bar(conteo_turnos_reales, x='Nombre', y='Cantidad_Turnos', color='Categoria', title="Bloques de Guardia Asignados (Semana vs FDS vs Despacho)", color_discrete_map={"SEMANA": "#1f77b4", "FDS": "#ff7f0e", "DESPACHO": "#8e24aa"}, text_auto=True)
             st.plotly_chart(fig_turnos, use_container_width=True)
         with col_g2:
             conteo_dias = df_asig.groupby(['Nombre', 'Categoria']).size().reset_index(name='Cantidad_Dias')
@@ -484,15 +484,13 @@ elif "Calendario" in pestana_actual:
     with st.expander("📖 **¿Cómo se asignan los turnos? (Reglas de Transparencia)**"):
         st.markdown("""
         El motor algorítmico asigna los turnos automáticamente basándose en las siguientes reglas para garantizar total equidad:
+        * **Muros Infranqueables (NUEVO):** Un profesional jamás recibirá turnos seguidos (Back-to-Back). Un Despacho aísla sus guardias usando la Regla Sandwich (7 días libres).
+        * **Variables Independientes (NUEVO):** Los Despachos tienen su propio contador de nivelación. Hacer despachos NO suma turnos a tu nivelación de Guardia FDS/Semana.
         * **Jornadas Bloqueadas:** Se manejan bloques de *Despacho (Lun-Vie)*, *Semana (Lun-Jue)* o *Fin de Semana (Vie-Dom)*. En caso de Lunes Festivo, el fin de semana se extiende hasta el Lunes, y la semana de martes a jueves.
         * **Roles por Jornada:** En Semana operan 2 ingenieros (Líder/Apoyo). En FDS operan 4 personas (Líder, 2 Apoyos, 1 Supervisor). Despacho es individual.
-        * **No Repetición de FDS:** 🔄 Ningún profesional (salvo Supervisores por necesidad operativa) puede ser asignado a un Fin de Semana si su última guardia fue también un Fin de Semana.
         * **Restricción de Líder Consecutivo:** 🚫 Ningún profesional puede ejercer el rol de Líder en dos turnos seguidos.
-        * **Descanso (Cooldown):** ⏳ Nadie recibe un turno si no han pasado al menos **20 días** desde su última guardia (el Despacho se evalúa de manera aislada).
-        * **Adyacencia de Despacho:** 🛡️ Un profesional no puede recibir un turno de Despacho si tiene una guardia (Semana/FDS) en un radio de 7 días.
+        * **Descanso (Cooldown):** ⏳ Para Guardias (Semana/FDS) se busca que pasen 20 días mínimo.
         * **Inducción (Prioridad Nuevo):** 🎓 El personal "Nuevo" es priorizado inicialmente en roles de Apoyo para garantizar un aprendizaje seguro sin exponer la operación.
-        * **Gestión de Conflictos:** 🛑 El sistema excluye automáticamente a cualquier profesional con vacaciones aprobadas o turnos manuales para evitar solapamientos físicos.
-        * **Equidad en Emergencias:** ⚠️ Ante ausentismos imprevistos, el sistema implementa un mecanismo de Respaldo Flexible para rellenar la malla sin dejar días descubiertos.
         """)
     st.markdown("---")
 
@@ -1027,88 +1025,68 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             
                         lunes_guia = lunes_proximo
 
-                    # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN
-                    conteo_turnos = {ing["id"]: 0 for ing in lista_ingenieros_motor} 
+                    # 3. PRE-CALCULAR DATOS DE OPTIMIZACIÓN - VARIABLES TOTALMENTE SEPARADAS
+                    conteo_disp = {ing["id"]: 0 for ing in lista_ingenieros_motor} 
+                    conteo_desp = {ing["id"]: 0 for ing in lista_ingenieros_motor} 
                     conteo_tipo_bloque = {ing["id"]: {"SEMANA": 0, "FDS": 0, "DESPACHO": 0} for ing in lista_ingenieros_motor} 
                     conteo_roles_hist = {ing["id"]: {"Líder": 0, "Apoyo": 0, "Supervisor": 0, "Despacho": 0} for ing in lista_ingenieros_motor}
                     ultimo_tipo_guardia = {ing["id"]: "SEMANA" for ing in lista_ingenieros_motor} 
                     ultimo_rol_guardia = {ing["id"]: None for ing in lista_ingenieros_motor}
                     turnos_por_mes = {ing["id"]: {} for ing in lista_ingenieros_motor}
                     
+                    def contar_bloques_fechas(lista_fechas_str):
+                        if not lista_fechas_str: return 0
+                        fechas_ordenadas = sorted([datetime.strptime(f, "%Y-%m-%d").date() for f in lista_fechas_str])
+                        bloques = 1
+                        for i in range(1, len(fechas_ordenadas)):
+                            if (fechas_ordenadas[i] - fechas_ordenadas[i-1]).days > 1: bloques += 1
+                        return bloques
+
                     for ing in lista_ingenieros_motor:
-                        turnos_ing = sorted([a for a in asigs_historicas if a["ingeniero_id"] == ing["id"] and datetime.strptime(a["fecha"], "%Y-%m-%d").date() < f_inicio_calc], key=lambda x: datetime.strptime(x["fecha"], "%Y-%m-%d"))
-                        bloques_hist = 0
+                        # Extraer turnos Históricos (< fecha inicio)
+                        hist_disp = [a["fecha"] for a in asigs_historicas if a["ingeniero_id"] == ing["id"] and datetime.strptime(a["fecha"], "%Y-%m-%d").date() < f_inicio_calc and "DESPACHO" not in a.get("tipo_dia", "").upper()]
+                        hist_desp = [a["fecha"] for a in asigs_historicas if a["ingeniero_id"] == ing["id"] and datetime.strptime(a["fecha"], "%Y-%m-%d").date() < f_inicio_calc and "DESPACHO" in a.get("tipo_dia", "").upper()]
                         
-                        def registrar_rol_hist(tipo_str, id_i):
-                            r_l = tipo_str.split("(")[-1].replace(")", "").strip()
-                            
-                            if "DESPACHO" in r_l or "DESPACHO" in tipo_str:
-                                conteo_roles_hist[id_i]["Despacho"] += 1
-                                conteo_tipo_bloque[id_i]["DESPACHO"] += 1
-                                return 
-                                
-                            if "APOYO" in r_l: conteo_roles_hist[id_i]["Apoyo"] += 1
-                            elif "LÍDER" in r_l or "LIDER" in r_l: conteo_roles_hist[id_i]["Líder"] += 1
-                            elif "SUPERVISOR" in r_l: conteo_roles_hist[id_i]["Supervisor"] += 1
-                            
-                            if "FDS" in tipo_str: 
-                                ultimo_tipo_guardia[id_i] = "FDS"
-                                conteo_tipo_bloque[id_i]["FDS"] += 1
-                            elif "SEMANA" in tipo_str: 
-                                ultimo_tipo_guardia[id_i] = "SEMANA"
-                                conteo_tipo_bloque[id_i]["SEMANA"] += 1
+                        # Extraer turnos Manuales Futuros (>= fecha inicio)
+                        man_disp = [a["fecha"] for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "MANUAL" in a.get("tipo_dia", "").upper() and "DESPACHO" not in a.get("tipo_dia", "").upper()]
+                        man_desp = [a["fecha"] for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "MANUAL" in a.get("tipo_dia", "").upper() and "DESPACHO" in a.get("tipo_dia", "").upper()]
 
-                        if turnos_ing:
-                            bloques_hist = 1
-                            mes_b = datetime.strptime(turnos_ing[0]["fecha"], "%Y-%m-%d").month
-                            turnos_por_mes[ing["id"]][mes_b] = turnos_por_mes[ing["id"]].get(mes_b, 0) + 1
-                            registrar_rol_hist(turnos_ing[0].get("tipo_dia", "").upper(), ing["id"])
-                            
-                            for i in range(1, len(turnos_ing)):
-                                f_actual = datetime.strptime(turnos_ing[i]["fecha"], "%Y-%m-%d").date()
-                                f_prev = datetime.strptime(turnos_ing[i-1]["fecha"], "%Y-%m-%d").date()
-                                if (f_actual - f_prev).days > 1:
-                                    bloques_hist += 1
-                                    turnos_por_mes[ing["id"]][f_actual.month] = turnos_por_mes[ing["id"]].get(f_actual.month, 0) + 1
-                                    registrar_rol_hist(turnos_ing[i].get("tipo_dia", "").upper(), ing["id"])
-                            
-                            for t in reversed(turnos_ing):
-                                ultimo_tipo_str = t.get("tipo_dia", "").upper()
-                                if "DESPACHO" not in ultimo_tipo_str:
-                                    if "LÍDER" in ultimo_tipo_str or "LIDER" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Líder"
-                                    elif "APOYO" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Apoyo"
-                                    elif "SUPERVISOR" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Supervisor"
-                                    break
-                        
-                        conteo_turnos[ing["id"]] = bloques_hist
+                        # Separación Estricta de Contadores
+                        conteo_disp[ing["id"]] = contar_bloques_fechas(hist_disp) + contar_bloques_fechas(man_disp)
+                        conteo_desp[ing["id"]] = contar_bloques_fechas(hist_desp) + contar_bloques_fechas(man_desp)
 
-                        # Bloques manuales futuros
+                        turnos_hist_all = sorted([a for a in asigs_historicas if a["ingeniero_id"] == ing["id"] and datetime.strptime(a["fecha"], "%Y-%m-%d").date() < f_inicio_calc], key=lambda x: datetime.strptime(x["fecha"], "%Y-%m-%d"))
                         turnos_man_futuros = sorted([a for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "MANUAL" in a.get("tipo_dia","").upper()], key=lambda x: datetime.strptime(x["fecha"], "%Y-%m-%d"))
-                        if turnos_man_futuros:
-                            bloques_hist_man = 1
-                            mes_b = datetime.strptime(turnos_man_futuros[0]["fecha"], "%Y-%m-%d").month
-                            turnos_por_mes[ing["id"]][mes_b] = turnos_por_mes[ing["id"]].get(mes_b, 0) + 1
-                            registrar_rol_hist(turnos_man_futuros[0].get("tipo_dia", "").upper(), ing["id"])
+                        all_relevant = turnos_hist_all + turnos_man_futuros
+                        
+                        for t in all_relevant:
+                            mes_t = datetime.strptime(t["fecha"], "%Y-%m-%d").month
+                            turnos_por_mes[ing["id"]][mes_t] = turnos_por_mes[ing["id"]].get(mes_t, 0) + 1
                             
-                            for i in range(1, len(turnos_man_futuros)):
-                                f_actual = datetime.strptime(turnos_man_futuros[i]["fecha"], "%Y-%m-%d").date()
-                                f_prev = datetime.strptime(turnos_man_futuros[i-1]["fecha"], "%Y-%m-%d").date()
-                                if (f_actual - f_prev).days > 1:
-                                    bloques_hist_man += 1
-                                    turnos_por_mes[ing["id"]][f_actual.month] = turnos_por_mes[ing["id"]].get(f_actual.month, 0) + 1
-                                    registrar_rol_hist(turnos_man_futuros[i].get("tipo_dia", "").upper(), ing["id"])
-                            
-                            # ⚡ MEJORA: Sumamos los turnos manuales para que cuenten en el balanceo general.
-                            conteo_turnos[ing["id"]] += bloques_hist_man
-                            
-                            # ⚡ MEJORA: Validar el último rol futuro manual para que el motor no lo asigne repetido en lo automático.
-                            for t in reversed(turnos_man_futuros):
-                                ultimo_tipo_str = t.get("tipo_dia", "").upper()
-                                if "DESPACHO" not in ultimo_tipo_str:
-                                    if "LÍDER" in ultimo_tipo_str or "LIDER" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Líder"
-                                    elif "APOYO" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Apoyo"
-                                    elif "SUPERVISOR" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Supervisor"
-                                    break
+                            tipo_str = t.get("tipo_dia", "").upper()
+                            r_l = tipo_str.split("(")[-1].replace(")", "").strip()
+                            if "DESPACHO" in r_l or "DESPACHO" in tipo_str:
+                                conteo_roles_hist[ing["id"]]["Despacho"] += 1
+                                conteo_tipo_bloque[ing["id"]]["DESPACHO"] += 1
+                            else:
+                                if "APOYO" in r_l: conteo_roles_hist[ing["id"]]["Apoyo"] += 1
+                                elif "LÍDER" in r_l or "LIDER" in r_l: conteo_roles_hist[ing["id"]]["Líder"] += 1
+                                elif "SUPERVISOR" in r_l: conteo_roles_hist[ing["id"]]["Supervisor"] += 1
+                                
+                                if "FDS" in tipo_str:
+                                    ultimo_tipo_guardia[ing["id"]] = "FDS"
+                                    conteo_tipo_bloque[ing["id"]]["FDS"] += 1
+                                elif "SEMANA" in tipo_str:
+                                    ultimo_tipo_guardia[ing["id"]] = "SEMANA"
+                                    conteo_tipo_bloque[ing["id"]]["SEMANA"] += 1
+                                    
+                        for t in reversed(all_relevant):
+                            ultimo_tipo_str = t.get("tipo_dia", "").upper()
+                            if "DESPACHO" not in ultimo_tipo_str:
+                                if "LÍDER" in ultimo_tipo_str or "LIDER" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Líder"
+                                elif "APOYO" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Apoyo"
+                                elif "SUPERVISOR" in ultimo_tipo_str: ultimo_rol_guardia[ing["id"]] = "Supervisor"
+                                break
                     
                     vacaciones_por_ing = {ing["id"]: set() for ing in lista_ingenieros_motor}
                     for v in lista_vacaciones:
@@ -1144,15 +1122,10 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             if ing_m in ultimo_tipo_guardia:
                                 if "DESPACHO" not in m["tipo_dia"].upper():
                                     ultimo_tipo_guardia[ing_m] = "FDS" if b['tipo'] == 'FDS' else "SEMANA"
-                                    
-                                    # ⚡ MEJORA: Actualizamos dinámicamente el último rol cuando escaneamos uno manual
                                     tipo_str = m["tipo_dia"].upper()
-                                    if "LÍDER" in tipo_str or "LIDER" in tipo_str:
-                                        ultimo_rol_guardia[ing_m] = "Líder"
-                                    elif "APOYO" in tipo_str:
-                                        ultimo_rol_guardia[ing_m] = "Apoyo"
-                                    elif "SUPERVISOR" in tipo_str:
-                                        ultimo_rol_guardia[ing_m] = "Supervisor"
+                                    if "LÍDER" in tipo_str or "LIDER" in tipo_str: ultimo_rol_guardia[ing_m] = "Líder"
+                                    elif "APOYO" in tipo_str: ultimo_rol_guardia[ing_m] = "Apoyo"
+                                    elif "SUPERVISOR" in tipo_str: ultimo_rol_guardia[ing_m] = "Supervisor"
 
                         roles_sup_necesarios, roles_ing_necesarios = [], []
 
@@ -1193,55 +1166,60 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             if not all(ingreso <= d <= salida for d in b['fechas']): continue
                             if es_fds and not ing.get("permite_fin_semana", True): continue
                             
-                            fechas_todas_ing = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"]]
-                            fechas_todas_ing.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"]])
-                            if any(f_b in fechas_todas_ing for f_b in b['fechas']): continue 
+                            fechas_disp_ing = [
+                                datetime.strptime(a["fecha"], "%Y-%m-%d").date() 
+                                for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" not in a.get("tipo_dia", "").upper()
+                            ] + [
+                                datetime.strptime(r["fecha"], "%Y-%m-%d").date() 
+                                for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" not in r.get("tipo_dia", "").upper()
+                            ]
+                            
+                            fechas_desp_ing = [
+                                datetime.strptime(a["fecha"], "%Y-%m-%d").date() 
+                                for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" in a.get("tipo_dia", "").upper()
+                            ] + [
+                                datetime.strptime(r["fecha"], "%Y-%m-%d").date() 
+                                for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" in r.get("tipo_dia", "").upper()
+                            ]
+
+                            # Fail-safe por si alguien quedó manual en esos mismos días
+                            if any(f_b in fechas_disp_ing or f_b in fechas_desp_ing for f_b in b['fechas']): continue 
                             
                             dias_vac = vacaciones_por_ing[ing["id"]]
                             fechas_bloque = b['fechas']
                             en_vacaciones_directas = any(d in dias_vac for d in fechas_bloque)
                             dia_antes = fechas_bloque[0] - timedelta(days=1)
                             dia_despues = fechas_bloque[-1] + timedelta(days=1)
-                            
                             es_sandwich_antes = (dia_antes.strftime("%Y-%m-%d") in festivos_colombia_lista) and ((dia_antes - timedelta(days=1)) in dias_vac)
                             es_sandwich_despues = (dia_despues.strftime("%Y-%m-%d") in festivos_colombia_lista) and ((dia_despues + timedelta(days=1)) in dias_vac)
 
                             if en_vacaciones_directas or (dia_antes in dias_vac) or (dia_despues in dias_vac) or es_sandwich_antes or es_sandwich_despues:
                                 continue 
-                            
-                            # REGLAS FLEXIBLES (Candidatos estrictos vs Backup)
+
+                            # --- CIERRES ESTRICTOS DE INVIABILIDAD (NO MÁS TURNOS SEGUIDOS) ---
+                            min_dist_disp = min([abs((f_b - f_i).days) for f_b in b['fechas'] for f_i in fechas_disp_ing], default=999)
+                            min_dist_desp = min([abs((f_b - f_i).days) for f_b in b['fechas'] for f_i in fechas_desp_ing], default=999)
+
                             rompe_regla_soft = False
-                            
-                            if es_fds and ultimo_tipo_guardia[ing["id"]] == "FDS" and not es_supervisor:
-                                rompe_regla_soft = True
+                            es_inviable = False # Descarte absoluto
 
                             if b['tipo'] == 'DESPACHO':
-                                fechas_evaluar_cooldown = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" in a.get("tipo_dia", "").upper()]
-                                fechas_evaluar_cooldown.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" in r.get("tipo_dia", "").upper()])
-                            else:
-                                fechas_evaluar_cooldown = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" not in a.get("tipo_dia", "").upper()]
-                                fechas_evaluar_cooldown.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" not in r.get("tipo_dia", "").upper()])
+                                if min_dist_desp <= 7: es_inviable = True # Prohíbe despachos de seguido
+                                if min_dist_disp <= 7: es_inviable = True # Sandwich contra guardias
+                            else: # FDS o SEMANA
+                                if min_dist_disp <= 7: es_inviable = True # Prohíbe guardias de seguido (Back-to-back absoluto)
+                                if min_dist_desp <= 7: es_inviable = True # Sandwich contra despachos
                                 
-                            cooldown_valido = True
-                            for f_b in b['fechas']:
-                                for f_i in fechas_evaluar_cooldown:
-                                    if abs((f_b - f_i).days) <= 20:  # ⚡ REGLA: Mínimo 20 días de distancia estrictos.
-                                        cooldown_valido = False
-                                        break
-                                if not cooldown_valido: break
-                            if not cooldown_valido: rompe_regla_soft = True
+                                # Si pasa el cierre estricto, evaluamos la meta óptima (20 días de cooldown)
+                                if min_dist_disp <= 20: 
+                                    rompe_regla_soft = True
 
-                            adyacencia_invalida = False
-                            if b['tipo'] == 'DESPACHO':
-                                fechas_guardia_adyacente = [datetime.strptime(a["fecha"], "%Y-%m-%d").date() for a in asigs_restantes if a["ingeniero_id"] == ing["id"] and "DESPACHO" not in a.get("tipo_dia", "").upper()]
-                                fechas_guardia_adyacente.extend([datetime.strptime(r["fecha"], "%Y-%m-%d").date() for r in registros_nuevos if r["ingeniero_id"] == ing["id"] and "DESPACHO" not in r.get("tipo_dia", "").upper()])
-                                for f_b in b['fechas']:
-                                    for f_g in fechas_guardia_adyacente:
-                                        if abs((f_b - f_g).days) <= 7:
-                                            adyacencia_invalida = True
-                                            break
-                                    if adyacencia_invalida: break
-                            if adyacencia_invalida: rompe_regla_soft = True
+                                if es_fds and ultimo_tipo_guardia.get(ing["id"]) == "FDS" and not es_supervisor:
+                                    rompe_regla_soft = True
+
+                            # Si rompió el cierre estricto, se ignora al candidato al 100%
+                            if es_inviable:
+                                continue 
 
                             if rompe_regla_soft:
                                 if es_supervisor: elegibles_sup_backup.append(ing)
@@ -1250,17 +1228,16 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                                 if es_supervisor: elegibles_sup_strict.append(ing)
                                 else: elegibles_ing_strict.append(ing)
                                 
-                        # RELLENAR HUECOS (Mecanismo Anti-Huecos, último recurso)
+                        # RELLENAR HUECOS CON RESERVA (Solo usan Backup viable, equilibrados por el universo correcto)
                         cant_sup_necesarios = len(roles_sup_necesarios)
                         while len(elegibles_sup_strict) < cant_sup_necesarios and elegibles_sup_backup:
-                            # ⚡ MEJORA: Al recurrir al Backup (último recurso), seguimos priorizando a quien menos carga total tenga.
-                            elegibles_sup_backup.sort(key=lambda x: conteo_turnos[x["id"]])
+                            elegibles_sup_backup.sort(key=lambda x: conteo_disp[x["id"]])
                             elegibles_sup_strict.append(elegibles_sup_backup.pop(0))
 
                         cant_ing_necesarios = len([r for r in roles_ing_necesarios if "Líder" in r or "Apoyo" in r or "Despacho" in r])
                         while len(elegibles_ing_strict) < cant_ing_necesarios and elegibles_ing_backup:
-                            # ⚡ MEJORA: Sacar de backup priorizando equidad global.
-                            elegibles_ing_backup.sort(key=lambda x: conteo_turnos[x["id"]])
+                            if b['tipo'] == 'DESPACHO': elegibles_ing_backup.sort(key=lambda x: conteo_desp[x["id"]])
+                            else: elegibles_ing_backup.sort(key=lambda x: conteo_disp[x["id"]])
                             elegibles_ing_strict.append(elegibles_ing_backup.pop(0))
 
                         elegibles_sup = elegibles_sup_strict
@@ -1268,17 +1245,17 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
 
                         def seleccionar_mejores(pool, cantidad, tipo_bloque_evaluado):
                             if cantidad == 0: return []
-                            
                             def sort_key(x):
                                 prioridad_mes = 0
                                 if tipo_bloque_evaluado in ["SEMANA", "DESPACHO"] and not x.get("permite_fin_semana", True):
-                                    if turnos_por_mes[x["id"]].get(mes_bloque, 0) == 0:
-                                        prioridad_mes = -1
-                                        
+                                    if turnos_por_mes[x["id"]].get(mes_bloque, 0) == 0: prioridad_mes = -1
                                 es_nuevo_val = -1 if x.get("es_nuevo", False) and es_critico else 0
                                 
-                                # ⚡ MEJORA: El conteo global de turnos es el OBJETIVO PRINCIPAL para la elección justa.
-                                return (prioridad_mes, conteo_turnos[x["id"]], conteo_tipo_bloque[x["id"]].get(tipo_bloque_evaluado, 0), es_nuevo_val)
+                                # Selección por universos separados: Despachos ignoran Guardia; Guardia ignora Despachos.
+                                if tipo_bloque_evaluado == "DESPACHO":
+                                    return (prioridad_mes, conteo_desp[x["id"]], es_nuevo_val)
+                                else:
+                                    return (prioridad_mes, conteo_disp[x["id"]], conteo_tipo_bloque[x["id"]].get(tipo_bloque_evaluado, 0), es_nuevo_val)
                                 
                             pool.sort(key=sort_key)
                             return pool[:cantidad]
@@ -1312,8 +1289,7 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                         for r_necesario in list(pool_roles_asignar):
                             if "Despacho" in r_necesario:
                                 if candidatos_apoyo:
-                                    # ⚡ MEJORA: Ordenar por cantidad de turnos global para equilibrar al más descansado.
-                                    candidatos_apoyo.sort(key=lambda x: (conteo_turnos[x["id"]], conteo_roles_hist[x["id"]]["Despacho"]))
+                                    candidatos_apoyo.sort(key=lambda x: (conteo_desp[x["id"]], conteo_roles_hist[x["id"]]["Despacho"]))
                                     ing_seleccionado = candidatos_apoyo.pop(0)
                                     candidatos_lider = [x for x in candidatos_lider if x["id"] != ing_seleccionado["id"]]
                                     conteo_roles_hist[ing_seleccionado["id"]]["Despacho"] += 1
@@ -1324,12 +1300,8 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             if "Líder" in r_necesario:
                                 if candidatos_lider:
                                     candidatos_validos_lider = [x for x in candidatos_lider if ultimo_rol_guardia.get(x["id"]) != "Líder"]
-                                    if not candidatos_validos_lider: 
-                                        # ⚡ MEJORA: Último recurso forzado, si no hay opciones, rompe la regla del Líder repetido.
-                                        candidatos_validos_lider = candidatos_lider
-                                        
-                                    # ⚡ MEJORA: Asegura Nivelación Prioritaria de Carga global.
-                                    candidatos_validos_lider.sort(key=lambda x: (conteo_turnos[x["id"]], x.get("es_nuevo", False), conteo_roles_hist[x["id"]]["Líder"]))
+                                    if not candidatos_validos_lider: candidatos_validos_lider = candidatos_lider
+                                    candidatos_validos_lider.sort(key=lambda x: (conteo_disp[x["id"]], x.get("es_nuevo", False), conteo_roles_hist[x["id"]]["Líder"]))
                                     ing_seleccionado = candidatos_validos_lider.pop(0)
                                     
                                     candidatos_lider = [x for x in candidatos_lider if x["id"] != ing_seleccionado["id"]]
@@ -1342,15 +1314,14 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                         for r_necesario in list(pool_roles_asignar):
                             if "Apoyo" in r_necesario:
                                 if candidatos_apoyo:
-                                    # ⚡ MEJORA: Apoyo también se asigna primero al que menos carga general tiene.
-                                    candidatos_apoyo.sort(key=lambda x: (conteo_turnos[x["id"]], conteo_roles_hist[x["id"]]["Apoyo"]))
+                                    candidatos_apoyo.sort(key=lambda x: (conteo_disp[x["id"]], conteo_roles_hist[x["id"]]["Apoyo"]))
                                     ing_seleccionado = candidatos_apoyo.pop(0)
                                     conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
                                     ultimo_rol_guardia[ing_seleccionado["id"]] = "Apoyo"
                                     asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
                         
                         for sup in elegidos_sup:
-                            conteo_turnos[sup["id"]] += 1
+                            conteo_disp[sup["id"]] += 1
                             conteo_tipo_bloque[sup["id"]]["FDS"] += 1
                             turnos_por_mes[sup["id"]][mes_bloque] = turnos_por_mes[sup["id"]].get(mes_bloque, 0) + 1
                             ultimo_tipo_guardia[sup["id"]] = "FDS"
@@ -1360,11 +1331,16 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                                     roles_cubiertos_dia[dia].add("Supervisor")
 
                         for ing, rol_asignado in asignaciones_finales_bloque:
-                            if "Despacho" not in rol_asignado:
-                                conteo_turnos[ing["id"]] += 1
-                                ultimo_tipo_guardia[ing["id"]] = "FDS" if b['tipo'] == 'FDS' else "SEMANA" 
-                            conteo_tipo_bloque[ing["id"]][b['tipo']] += 1
                             turnos_por_mes[ing["id"]][mes_bloque] = turnos_por_mes[ing["id"]].get(mes_bloque, 0) + 1
+                            
+                            # Crecimiento de contadores por separado
+                            if "Despacho" in rol_asignado:
+                                conteo_desp[ing["id"]] += 1
+                            else:
+                                conteo_disp[ing["id"]] += 1
+                                ultimo_tipo_guardia[ing["id"]] = "FDS" if b['tipo'] == 'FDS' else "SEMANA" 
+                                
+                            conteo_tipo_bloque[ing["id"]][b['tipo']] += 1
                             
                             for dia in b['fechas']: 
                                 debe_insertar = False
@@ -1380,7 +1356,7 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                     
                     if registros_nuevos:
                         supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Optimización completada con éxito logrando cargas niveladas!")
+                        st.success("✅ ¡Optimización completada aislando Despachos y garantizando NO turnos seguidos!")
                         st.balloons()
                         st.rerun()
                     elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango y calcula desde cero)":
