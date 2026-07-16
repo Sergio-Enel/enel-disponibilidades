@@ -445,23 +445,23 @@ if "Dashboard" in pestana_actual:
             if len(lista_ingenieros) > 0:
                 progreso_vac = []
                 for ing in lista_ingenieros:
-                    if not ing.get("exento_disponibilidad", False):
-                        min_v = ing.get("min_vacaciones", 15)
-                        
-                        # Contar solo "Vacaciones" para este ingeniero
-                        dias_tomados = 0
-                        for v in lista_vacaciones:
-                            if v['ingeniero_id'] == ing['id'] and v.get('motivo') == 'Vacaciones':
-                                dias_tomados += (datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1
-                        
-                        faltantes = max(0, min_v - dias_tomados)
-                        
-                        progreso_vac.append({
-                            "Nombre": ing["nombre"],
-                            "Tomadas": dias_tomados,
-                            "Faltantes": faltantes,
-                            "Mínimo Exigido": min_v
-                        })
+                    # ✅ Aquí se quitó la restricción que filtraba a los ingenieros exentos
+                    min_v = ing.get("min_vacaciones", 15)
+                    
+                    # Contar solo "Vacaciones" para este ingeniero
+                    dias_tomados = 0
+                    for v in lista_vacaciones:
+                        if v['ingeniero_id'] == ing['id'] and v.get('motivo') == 'Vacaciones':
+                            dias_tomados += (datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1
+                    
+                    faltantes = max(0, min_v - dias_tomados)
+                    
+                    progreso_vac.append({
+                        "Nombre": ing["nombre"],
+                        "Tomadas": dias_tomados,
+                        "Faltantes": faltantes,
+                        "Mínimo Exigido": min_v
+                    })
                 
                 df_progreso = pd.DataFrame(progreso_vac)
                 df_progreso_melt = df_progreso.melt(id_vars=["Nombre", "Mínimo Exigido"], value_vars=["Tomadas", "Faltantes"], var_name="Estado", value_name="Días")
@@ -1330,208 +1330,4 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                                 if min_dist_desp <= 7: es_inviable = True # Jamás Guardia pisando Despacho
                                 
                                 # Si pasa el muro infranqueable, evaluamos el Cooldown suave de Guardia
-                                if min_dist_disp <= 20: 
-                                    rompe_regla_soft = True
-
-                                # Restricción de No Repetir FDS de seguido (A menos que se deba hacer excepción)
-                                if es_fds and ultimo_tipo_guardia.get(ing["id"]) == "FDS" and not es_supervisor:
-                                    rompe_regla_soft = True
-
-                            # Exclusión absoluta: Si rompe un muro infranqueable, no entra ni como suplente.
-                            if es_inviable: continue 
-
-                            ing_copia = ing.copy()
-                            ing_copia['_is_backup'] = rompe_regla_soft
-
-                            if rompe_regla_soft:
-                                if es_supervisor: elegibles_sup_backup.append(ing_copia)
-                                else: elegibles_ing_backup.append(ing_copia)
-                            else:
-                                if es_supervisor: elegibles_sup_strict.append(ing_copia)
-                                else: elegibles_ing_strict.append(ing_copia)
-                                
-                        # Unificamos los pools garantizando con la key '_is_backup' que los suplentes queden al final.
-                        elegibles_sup = elegibles_sup_strict + elegibles_sup_backup
-                        elegibles_para_ing = elegibles_ing_strict + elegibles_ing_backup
-                        
-                        elegidos_sup = []
-                        if es_fds and roles_sup_necesarios:
-                            # Los supervisores también respetan su prioridad (Strict primero, luego backup)
-                            elegibles_sup.sort(key=lambda x: (x.get('_is_backup', False), conteo_disp[x["id"]]))
-                            if elegibles_sup:
-                                sup_seleccionado = elegibles_sup.pop(0)
-                                elegidos_sup.append(sup_seleccionado)
-                                conteo_roles_hist[sup_seleccionado["id"]]["Supervisor"] += 1
-                                ultimo_rol_guardia[sup_seleccionado["id"]] = "Supervisor"
-                                elegibles_para_ing.extend(elegibles_sup) # El resto de supervisores pueden ir como apoyo si hacen falta
-
-                        asignaciones_finales_bloque = []
-                        pool_roles_asignar = roles_ing_necesarios.copy()
-                        
-                        # --- ASIGNACIÓN 1: DESPACHO ---
-                        # Equilibrado puro por conteo de despachos y garantizando 1 al mes para los restringidos
-                        if "Despacho" in pool_roles_asignar:
-                            elegibles_para_ing.sort(key=lambda x: (
-                                x.get('_is_backup', False),
-                                conteo_desp[x["id"]], 
-                                0 if turnos_por_mes[x["id"]].get(mes_bloque, 0) == 0 and not x.get("permite_fin_semana", True) else 1
-                            ))
-                            if elegibles_para_ing:
-                                ing_seleccionado = elegibles_para_ing.pop(0)
-                                conteo_roles_hist[ing_seleccionado["id"]]["Despacho"] += 1
-                                asignaciones_finales_bloque.append((ing_seleccionado, "Despacho"))
-                                pool_roles_asignar.remove("Despacho")
-
-                        # --- ASIGNACIÓN 2: LÍDER ---
-                        # Jamás un líder de seguido. Ni siquiera como backup.
-                        if "Líder" in pool_roles_asignar:
-                            candidatos_lider = [x for x in elegibles_para_ing if "SUPERVISOR" not in x.get("rol", "").upper() and ultimo_rol_guardia.get(x["id"]) != "Líder"]
-                            if candidatos_lider:
-                                candidatos_lider.sort(key=lambda x: (
-                                    x.get('_is_backup', False),
-                                    0 if turnos_por_mes[x["id"]].get(mes_bloque, 0) == 0 and not x.get("permite_fin_semana", True) else 1,
-                                    conteo_disp[x["id"]],
-                                    1 if x.get("es_nuevo", False) else 0, # Los nuevos son evadidos para ser Líder
-                                    conteo_roles_hist[x["id"]]["Líder"]
-                                ))
-                                ing_seleccionado = candidatos_lider[0]
-                                elegibles_para_ing = [x for x in elegibles_para_ing if x["id"] != ing_seleccionado["id"]]
-                                conteo_roles_hist[ing_seleccionado["id"]]["Líder"] += 1
-                                ultimo_rol_guardia[ing_seleccionado["id"]] = "Líder"
-                                asignaciones_finales_bloque.append((ing_seleccionado, "Líder"))
-                                pool_roles_asignar.remove("Líder")
-
-                        # --- ASIGNACIÓN 3: APOYOS ---
-                        for r_necesario in [r for r in pool_roles_asignar if "Apoyo" in r]:
-                            if elegibles_para_ing:
-                                elegibles_para_ing.sort(key=lambda x: (
-                                    x.get('_is_backup', False),
-                                    0 if turnos_por_mes[x["id"]].get(mes_bloque, 0) == 0 and not x.get("permite_fin_semana", True) else 1,
-                                    conteo_disp[x["id"]],
-                                    0 if x.get("es_nuevo", False) else 1, # Los nuevos son priorizados para Apoyo
-                                    conteo_roles_hist[x["id"]]["Apoyo"]
-                                ))
-                                ing_seleccionado = elegibles_para_ing.pop(0)
-                                conteo_roles_hist[ing_seleccionado["id"]]["Apoyo"] += 1
-                                ultimo_rol_guardia[ing_seleccionado["id"]] = "Apoyo"
-                                asignaciones_finales_bloque.append((ing_seleccionado, r_necesario))
-                        
-                        # --- GUARDAR BLOQUE EN BBDD ---
-                        for sup in elegidos_sup:
-                            conteo_disp[sup["id"]] += 1
-                            conteo_tipo_bloque[sup["id"]]["FDS"] += 1
-                            turnos_por_mes[sup["id"]][mes_bloque] = turnos_por_mes[sup["id"]].get(mes_bloque, 0) + 1
-                            ultimo_tipo_guardia[sup["id"]] = "FDS"
-                            for dia in b['fechas']: 
-                                if "Supervisor" not in roles_cubiertos_dia[dia]:
-                                    registros_nuevos.append({"fecha": str(dia), "ingeniero_id": sup["id"], "tipo_dia": f"FDS (Supervisor)"})
-                                    roles_cubiertos_dia[dia].add("Supervisor")
-
-                        for ing, rol_asignado in asignaciones_finales_bloque:
-                            turnos_por_mes[ing["id"]][mes_bloque] = turnos_por_mes[ing["id"]].get(mes_bloque, 0) + 1
-                            
-                            if "Despacho" in rol_asignado:
-                                conteo_desp[ing["id"]] += 1
-                            else:
-                                conteo_disp[ing["id"]] += 1
-                                ultimo_tipo_guardia[ing["id"]] = "FDS" if b['tipo'] == 'FDS' else "SEMANA" 
-                                
-                            conteo_tipo_bloque[ing["id"]][b['tipo']] += 1
-                            
-                            for dia in b['fechas']: 
-                                debe_insertar = False
-                                if "Despacho" in rol_asignado and "Despacho" not in roles_cubiertos_dia[dia]: debe_insertar = True
-                                elif "Líder" in rol_asignado and "Líder" not in roles_cubiertos_dia[dia]: debe_insertar = True
-                                elif "Apoyo" in rol_asignado:
-                                    apoyos_dia = sum(1 for r in roles_cubiertos_dia[dia] if "Apoyo" in r)
-                                    if apoyos_dia < 2: debe_insertar = True
-                                
-                                if debe_insertar:
-                                    registros_nuevos.append({"fecha": str(dia), "ingeniero_id": ing["id"], "tipo_dia": f"{b['tipo']} ({rol_asignado})"})
-                                    roles_cubiertos_dia[dia].add(rol_asignado)
-                    
-                    if registros_nuevos:
-                        supabase.table("asignaciones").insert(registros_nuevos).execute()
-                        st.success("✅ ¡Optimización completada garantizando reglas fusionadas, equilibrio en despachos y muros infranqueables absolutos!")
-                        st.balloons()
-                        st.rerun()
-                    elif modo_ejecucion != "⚠️ Sobrescribir TODO (Borra todos los turnos del rango y calcula desde cero)":
-                        st.info("No se encontraron jornadas vacías para asignar en este rango.")
-                        
-                except Exception as e:
-                    st.error(f"Error procesando el motor: {e}")
-
-elif "Asignaciones Manuales" in pestana_actual and st.session_state.role == "admin":
-    st.header("🔄 Asignaciones y Relevos Manuales")
-    col_r1, col_r2 = st.columns(2)
-    with col_r1:
-        st.subheader("➕ Agregar Turno Manual")
-        rango_manual = st.date_input("Rango de fechas a asignar:", [], min_value=FECHA_MIN)
-        ing_manual = st.selectbox("Profesional:", lista_ingenieros, format_func=lambda x: f"{x['nombre']}", key="ing_man")
-        rol_manual = st.selectbox("Rol en el turno:", ["Líder", "Apoyo", "Apoyo 1", "Apoyo 2", "Supervisor", "Despacho 6 AM"])
-        if st.button("💾 Guardar Asignación Manual", use_container_width=True):
-            if len(rango_manual) > 0:
-                try:
-                    dia_aux = rango_manual[0]
-                    while dia_aux <= rango_manual[-1]:
-                        str_d = str(dia_aux)
-                        existe = supabase.table("asignaciones").select("id").eq("fecha", str_d).eq("ingeniero_id", ing_manual["id"]).execute().data
-                        if existe: supabase.table("asignaciones").update({"tipo_dia": f"MANUAL ({rol_manual})"}).eq("id", existe[0]["id"]).execute()
-                        else: supabase.table("asignaciones").insert({"fecha": str_d, "ingeniero_id": ing_manual["id"], "tipo_dia": f"MANUAL ({rol_manual})"}).execute()
-                        dia_aux += timedelta(days=1)
-                    st.success("✅ Turnos manuales gestionados.")
-                    st.rerun()
-                except Exception as e: st.error(f"Error técnico: {e}")
-            else: st.error("⚠️ Selecciona al menos una fecha.")
-    
-    with col_r2:
-        st.subheader("🔄 Relevo o Cancelación por Día")
-        if len(lista_asignaciones) > 0:
-            fecha_relevo = st.date_input("1. Selecciona la fecha:", min_value=FECHA_MIN)
-            turnos_dia = [a for a in lista_asignaciones if a["fecha"] == str(fecha_relevo)]
-            if turnos_dia:
-                turno_sel = st.selectbox("2. Turno a modificar:", [f"{t['id']} - {dict_nombres_ing.get(t['ingeniero_id'])} ({t['tipo_dia']})" for t in turnos_dia])
-                id_asig = int(turno_sel.split("-")[0].strip())
-                nuevo_ing = st.selectbox("Quién toma el relevo:", lista_ingenieros, format_func=lambda x: x['nombre'])
-                
-                if st.button("🔄 Ejecutar Relevo"):
-                    try:
-                        ocupado = supabase.table("asignaciones").select("id").eq("fecha", str(fecha_relevo)).eq("ingeniero_id", nuevo_ing["id"]).execute().data
-                        if ocupado: st.error(f"⚠️ {nuevo_ing['nombre']} ya tiene un turno ese día.")
-                        else:
-                            supabase.table("asignaciones").update({"ingeniero_id": nuevo_ing["id"]}).eq("id", id_asig).execute()
-                            st.rerun()
-                    except Exception as e: st.error(f"Error: {e}")
-                
-                if st.button("❌ Cancelar Turno"):
-                    try:
-                        supabase.table("asignaciones").delete().eq("id", id_asig).execute()
-                        st.rerun()
-                    except Exception as e: st.error(f"Error: {e}")
-
-    st.markdown("---")
-    st.subheader("🌅 Relevo / Cancelación por Rango de Fechas")
-    col_b1, col_b2 = st.columns(2)
-    with col_b1:
-        rango_mod = st.date_input("1. Rango de Fechas del bloque:", [], min_value=FECHA_MIN, key="rango_masivo")
-        if len(rango_mod) == 2:
-            turnos_en_rango = [a for a in lista_asignaciones if rango_mod[0] <= datetime.strptime(a['fecha'], "%Y-%m-%d").date() <= rango_mod[1]]
-            if turnos_en_rango:
-                ing_a_reemplazar = st.selectbox("2. Profesional a retirar:", list(set([a['ingeniero_id'] for a in turnos_en_rango])), format_func=lambda x: dict_nombres_ing.get(x, 'Desconocido'))
-                ids_objetivo = [a['id'] for a in turnos_en_rango if a['ingeniero_id'] == ing_a_reemplazar]
-                
-    with col_b2:
-        if len(rango_mod) == 2 and turnos_en_rango:
-            st.info(f"Se detectaron **{len(ids_objetivo)}** días asignados.")
-            ing_relevo_masivo = st.selectbox("3. Profesional de relevo:", lista_ingenieros, format_func=lambda x: f"{x['nombre']}")
-            if st.button("🔄 Ejecutar Relevo de Bloque", use_container_width=True):
-                try:
-                    for id_t in ids_objetivo: supabase.table("asignaciones").update({"ingeniero_id": ing_relevo_masivo["id"]}).eq("id", id_t).execute()
-                    st.success("✅ ¡Bloque relevado!")
-                    st.rerun()
-                except Exception as e: st.error(f"Error: {e}")
-            if st.button("❌ Eliminar Bloque", use_container_width=True):
-                try:
-                    for i in range(0, len(ids_objetivo), 100): supabase.table("asignaciones").delete().in_("id", ids_objetivo[i:i+100]).execute()
-                    st.rerun()
-                except Exception as e: st.error(f"Error: {e}")
+                                if min_dist_disp <= 20:
