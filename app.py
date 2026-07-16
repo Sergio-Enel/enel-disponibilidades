@@ -393,7 +393,7 @@ if "Dashboard" in pestana_actual:
 
         st.markdown("---")
 
-        st.markdown("### 🌴 Impacto de Ausentismos")
+        st.markdown("### 🌴 Impacto de Ausentismos (Global)")
         if len(lista_vacaciones) > 0:
             vac_records = []
             for v in lista_vacaciones:
@@ -408,6 +408,67 @@ if "Dashboard" in pestana_actual:
                 st.plotly_chart(fig_vac_bar, use_container_width=True)
             with col_v2: 
                 st.plotly_chart(px.pie(df_vac_stats, names='Motivo', values='Dias_Ausente', title="Motivos Globales", hole=0.4), use_container_width=True)
+                
+            # --- NUEVO: IMPACTO DE AUSENTISMOS POR RANGO DE FECHAS ---
+            st.markdown("#### 📅 Impacto de Ausentismos por Rango de Fechas")
+            rango_aus = st.date_input("Selecciona el rango para analizar ausentismos:", [], key="rango_aus_dash")
+            if len(rango_aus) == 2:
+                f_ini_aus, f_fin_aus = rango_aus[0], rango_aus[1]
+                vac_records_fil = []
+                for v in lista_vacaciones:
+                    v_ini = datetime.strptime(v['fecha_inicio'], "%Y-%m-%d").date()
+                    v_fin = datetime.strptime(v['fecha_fin'], "%Y-%m-%d").date()
+                    
+                    # Verificar si se cruzan las fechas
+                    if v_ini <= f_fin_aus and v_fin >= f_ini_aus:
+                        # Calcular solo los días que caen dentro del rango
+                        overlap_ini = max(v_ini, f_ini_aus)
+                        overlap_fin = min(v_fin, f_fin_aus)
+                        dias_fuera_fil = (overlap_fin - overlap_ini).days + 1
+                        
+                        nom = dict_nombres_ing.get(v['ingeniero_id'], 'Desconocido')
+                        vac_records_fil.append({'Nombre': nom, 'Motivo': v.get('motivo', 'Otro'), 'Dias_Ausente': dias_fuera_fil})
+                
+                if vac_records_fil:
+                    df_vac_stats_fil = pd.DataFrame(vac_records_fil).groupby(['Nombre', 'Motivo'])['Dias_Ausente'].sum().reset_index()
+                    col_vf1, col_vf2 = st.columns([2, 1])
+                    with col_vf1:
+                        fig_vac_bar_fil = px.bar(df_vac_stats_fil, x='Nombre', y='Dias_Ausente', color='Motivo', title=f"Días de Ausencia ({f_ini_aus} a {f_fin_aus})", text_auto=True, color_discrete_map={"Vacaciones": "#00bcd4", "Incapacidad Médica": "#f44336", "Permiso Empresa": "#9c27b0", "Licencia": "#4caf50", "Festivo": "#283593", "Otro": "#ff9800"})
+                        st.plotly_chart(fig_vac_bar_fil, use_container_width=True)
+                    with col_vf2: 
+                        st.plotly_chart(px.pie(df_vac_stats_fil, names='Motivo', values='Dias_Ausente', title="Motivos (Rango)", hole=0.4), use_container_width=True)
+                else:
+                    st.info("No hay ausentismos en el rango seleccionado.")
+                    
+            # --- NUEVO: CUMPLIMIENTO META DE VACACIONES ---
+            st.markdown("#### 🎯 Cumplimiento Meta de Vacaciones (RRHH)")
+            if len(lista_ingenieros) > 0:
+                progreso_vac = []
+                for ing in lista_ingenieros:
+                    if not ing.get("exento_disponibilidad", False):
+                        min_v = ing.get("min_vacaciones", 15)
+                        
+                        # Contar solo "Vacaciones" para este ingeniero
+                        dias_tomados = 0
+                        for v in lista_vacaciones:
+                            if v['ingeniero_id'] == ing['id'] and v.get('motivo') == 'Vacaciones':
+                                dias_tomados += (datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1
+                        
+                        faltantes = max(0, min_v - dias_tomados)
+                        
+                        progreso_vac.append({
+                            "Nombre": ing["nombre"],
+                            "Tomadas": dias_tomados,
+                            "Faltantes": faltantes,
+                            "Mínimo Exigido": min_v
+                        })
+                
+                df_progreso = pd.DataFrame(progreso_vac)
+                df_progreso_melt = df_progreso.melt(id_vars=["Nombre", "Mínimo Exigido"], value_vars=["Tomadas", "Faltantes"], var_name="Estado", value_name="Días")
+                
+                fig_prog = px.bar(df_progreso_melt, x="Nombre", y="Días", color="Estado", title="Vacaciones Tomadas vs Faltantes para cumplir Mínimo", text_auto=True, color_discrete_map={"Tomadas": "#00bcd4", "Faltantes": "#ff9800"})
+                st.plotly_chart(fig_prog, use_container_width=True)
+
         else: st.info("No hay registros de ausentismos para analizar.")
 
         st.markdown("---")
@@ -823,13 +884,17 @@ elif "Gestión de Equipo" in pestana_actual and st.session_state.role == "admin"
         tipo_contrato = st.radio("Tipo de Contrato:", ["Término Indefinido", "Caso Especial (Tiene fecha de salida)"])
         str_f_salida = str(st.date_input("Fecha de Salida", max(datetime.now().date() + timedelta(days=30), FECHA_MIN), min_value=FECHA_MIN)) if "Caso" in tipo_contrato else "2099-12-31"
         
+        # --- NUEVO: MINIMO VACACIONES ---
+        min_vac_nuevo = st.number_input("Mínimo Vacaciones Exigido (RRHH):", min_value=0, value=15)
+
         if st.button("💾 Guardar Trabajador", use_container_width=True):
             if nombre:
                 try:
                     supabase.table("ingenieros").insert({
                         "nombre": nombre, "correo": correo_nuevo, "rol": rol, "permite_fin_semana": permite_fds, "es_nuevo": es_nuevo,
                         "fecha_ingreso": str(f_ingreso), "fecha_salida": str_f_salida,
-                        "exento_disponibilidad": not participa_disp
+                        "exento_disponibilidad": not participa_disp,
+                        "min_vacaciones": min_vac_nuevo
                     }).execute()
                     st.success("✅ Guardado correctamente.")
                     st.rerun()
@@ -846,12 +911,13 @@ elif "Gestión de Equipo" in pestana_actual and st.session_state.role == "admin"
             if 'fecha_salida' not in df_ing.columns: df_ing['fecha_salida'] = "2099-12-31"
             if 'exento_disponibilidad' not in df_ing.columns: df_ing['exento_disponibilidad'] = False
             if 'correo' not in df_ing.columns: df_ing['correo'] = "Sin Correo"
+            if 'min_vacaciones' not in df_ing.columns: df_ing['min_vacaciones'] = 15
             
             df_ing['Vigencia Hasta'] = df_ing['fecha_salida'].apply(lambda x: "Indefinido" if "2099" in str(x) else x)
             df_ing['Estado Operativo'] = df_ing['exento_disponibilidad'].apply(lambda x: "🚫 EXENTO" if x else "Activo")
             
-            df_show = df_ing[["id", "nombre", "correo", "rol", "es_nuevo", "Estado Operativo", "Vigencia Hasta"]].copy()
-            df_show.columns = ["ID", "Nombre", "Correo", "Rol", "¿Nuevo?", "Estado", "Salida"]
+            df_show = df_ing[["id", "nombre", "correo", "rol", "es_nuevo", "Estado Operativo", "Vigencia Hasta", "min_vacaciones"]].copy()
+            df_show.columns = ["ID", "Nombre", "Correo", "Rol", "¿Nuevo?", "Estado", "Salida", "Mín. Vacaciones"]
             st.dataframe(df_show, use_container_width=True, hide_index=True)
             
             st.markdown("---")
@@ -868,6 +934,21 @@ elif "Gestión de Equipo" in pestana_actual and st.session_state.role == "admin"
                     st.rerun()
                 except Exception as e: st.error(f"Error al actualizar: {e}")
                 
+            # --- NUEVO: ACTUALIZAR MÍNIMO DE VACACIONES ---
+            st.markdown("---")
+            st.subheader("🏖️ Configurar Mínimo de Vacaciones")
+            st.caption("Fija el mínimo de días de vacaciones exigido por RRHH para un trabajador.")
+            ing_a_vac = st.selectbox("Selecciona al profesional para actualizar meta:", lista_ingenieros, format_func=lambda x: f"{x['id']} - {x['nombre']}", key="edit_min_vac")
+            min_vac_actual = ing_a_vac.get("min_vacaciones", 15) if ing_a_vac else 15
+            nuevo_min_vac = st.number_input("Días Mínimos Exigidos:", min_value=0, value=int(min_vac_actual))
+            
+            if st.button("🔄 Actualizar Mínimo de Vacaciones"):
+                try:
+                    supabase.table("ingenieros").update({"min_vacaciones": nuevo_min_vac}).eq("id", ing_a_vac["id"]).execute()
+                    st.success(f"✅ Mínimo de vacaciones actualizado para {ing_a_vac['nombre']}.")
+                    st.rerun()
+                except Exception as e: st.error(f"Error al actualizar: {e}")
+
             st.markdown("---")
 
             col_b1, col_b2 = st.columns(2)
@@ -965,6 +1046,42 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                             st.success(f"✅ Se borraron {len(ids_a_borrar_auto)} turnos automáticos.")
                             st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
+                    
+        # --- NUEVO: LIMPIEZA MASIVA DE AUSENTISMOS EN UN RANGO ---
+        st.markdown("---")
+        st.subheader("🧹 Limpieza Masiva de Ausentismos (Vacaciones y Propuestas)")
+        rango_borrar_aus = st.date_input("Selecciona el rango para borrar ausentismos (limpiar años pasados):", [], min_value=FECHA_MIN, key="rango_borrar_aus")
+        if len(rango_borrar_aus) == 2:
+            if st.button("🗑️ Eliminar Ausentismos en el Rango Seleccionado", use_container_width=True):
+                with st.spinner("Borrando ausentismos..."):
+                    try:
+                        f_i, f_f = rango_borrar_aus[0], rango_borrar_aus[1]
+                        
+                        # Recopilar IDs de vacaciones oficiales a eliminar
+                        ids_vac_del = []
+                        for v in lista_vacaciones:
+                            v_ini = datetime.strptime(v['fecha_inicio'], "%Y-%m-%d").date()
+                            v_fin = datetime.strptime(v['fecha_fin'], "%Y-%m-%d").date()
+                            if v_ini <= f_f and v_fin >= f_i: ids_vac_del.append(v['id'])
+                            
+                        # Recopilar IDs de propuestas a eliminar
+                        ids_prop_del = []
+                        for p in lista_propuestas:
+                            p_ini = datetime.strptime(p['fecha_inicio'], "%Y-%m-%d").date()
+                            p_fin = datetime.strptime(p['fecha_fin'], "%Y-%m-%d").date()
+                            if p_ini <= f_f and p_fin >= f_i: ids_prop_del.append(p['id'])
+                            
+                        # Eliminar por bloques (chunks) para evitar desbordes en Supabase
+                        if ids_vac_del:
+                            for i in range(0, len(ids_vac_del), 100): 
+                                supabase.table("vacaciones").delete().in_("id", ids_vac_del[i:i+100]).execute()
+                        if ids_prop_del:
+                            for i in range(0, len(ids_prop_del), 100): 
+                                supabase.table("propuestas_ausentismos").delete().in_("id", ids_prop_del[i:i+100]).execute()
+                            
+                        st.success(f"✅ Se borraron {len(ids_vac_del)} registros oficiales y {len(ids_prop_del)} propuestas en el rango {f_i} a {f_f}.")
+                        st.rerun()
+                    except Exception as e: st.error(f"Error borrando ausentismos: {e}")
 
         st.markdown("---")
         st.subheader("Opciones de Ejecución del Algoritmo")
