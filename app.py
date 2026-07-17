@@ -445,23 +445,22 @@ if "Dashboard" in pestana_actual:
             if len(lista_ingenieros) > 0:
                 progreso_vac = []
                 for ing in lista_ingenieros:
-                    if not ing.get("exento_disponibilidad", False):
-                        min_v = ing.get("min_vacaciones", 15)
-                        
-                        # Contar solo "Vacaciones" para este ingeniero
-                        dias_tomados = 0
-                        for v in lista_vacaciones:
-                            if v['ingeniero_id'] == ing['id'] and v.get('motivo') == 'Vacaciones':
-                                dias_tomados += (datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1
-                        
-                        faltantes = max(0, min_v - dias_tomados)
-                        
-                        progreso_vac.append({
-                            "Nombre": ing["nombre"],
-                            "Tomadas": dias_tomados,
-                            "Faltantes": faltantes,
-                            "Mínimo Exigido": min_v
-                        })
+                    min_v = ing.get("min_vacaciones", 15)
+                    
+                    # Contar solo "Vacaciones" para este ingeniero
+                    dias_tomados = 0
+                    for v in lista_vacaciones:
+                        if v['ingeniero_id'] == ing['id'] and v.get('motivo') == 'Vacaciones':
+                            dias_tomados += (datetime.strptime(v['fecha_fin'], "%Y-%m-%d") - datetime.strptime(v['fecha_inicio'], "%Y-%m-%d")).days + 1
+                    
+                    faltantes = max(0, min_v - dias_tomados)
+                    
+                    progreso_vac.append({
+                        "Nombre": ing["nombre"],
+                        "Tomadas": dias_tomados,
+                        "Faltantes": faltantes,
+                        "Mínimo Exigido": min_v
+                    })
                 
                 df_progreso = pd.DataFrame(progreso_vac)
                 df_progreso_melt = df_progreso.melt(id_vars=["Nombre", "Mínimo Exigido"], value_vars=["Tomadas", "Faltantes"], var_name="Estado", value_name="Días")
