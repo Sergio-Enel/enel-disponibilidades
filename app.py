@@ -1333,9 +1333,9 @@ elif "Motor Algorítmico" in pestana_actual and st.session_state.role == "admin"
                                 if min_dist_disp <= 20: 
                                     rompe_regla_soft = True
 
-                                # Restricción de No Repetir FDS de seguido (A menos que se deba hacer excepción)
-                                if es_fds and ultimo_tipo_guardia.get(ing["id"]) == "FDS" and not es_supervisor:
-                                    rompe_regla_soft = True
+                            # Restricción de No Repetir FDS de seguido (A menos que se deba hacer excepción)
+                            if es_fds and ultimo_tipo_guardia.get(ing["id"]) == "FDS" and not es_supervisor:
+                                rompe_regla_soft = True
 
                             # Exclusión absoluta: Si rompe un muro infranqueable, no entra ni como suplente.
                             if es_inviable: continue 
@@ -1535,4 +1535,3 @@ elif "Asignaciones Manuales" in pestana_actual and st.session_state.role == "adm
                     for i in range(0, len(ids_objetivo), 100): supabase.table("asignaciones").delete().in_("id", ids_objetivo[i:i+100]).execute()
                     st.rerun()
                 except Exception as e: st.error(f"Error: {e}")
-
